@@ -1,1 +1,0 @@
-select * from sys.sysprocesses where blocked > 0 and spid <> blocked
