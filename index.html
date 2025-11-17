@@ -15,7 +15,29 @@
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             min-height: 100vh;
         }
-        nav {
+        /* Top-left circular photo */
+        .profile-photo {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 4px solid #fff;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    margin-left: 20px;
+}
+
+.hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+}
+
+.hero h1 {
+    flex: 1;
+    text-align: center;
+}
+nav {
             background-color: rgba(52, 152, 219, 0.9);
             padding: 10px 0;
             position: sticky;
@@ -69,19 +91,10 @@
             border-left: 5px solid #3498db;
             margin: 10px 0;
         }
-        .project {
-            margin-bottom: 20px;
-        }
-        .project h3 {
-            color: #3498db;
-        }
-        a {
-            color: #3498db;
-            text-decoration: none;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
+        .project { margin-bottom: 20px; }
+        .project h3 { color: #3498db; }
+        a { color: #3498db; text-decoration: none; }
+        a:hover { text-decoration: underline; }
         .download-btn {
             display: inline-block;
             background-color: #3498db;
@@ -91,7 +104,7 @@
             border-radius: 5px;
             font-weight: bold;
             transition: background-color 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         }
         .download-btn:hover {
             background-color: #2980b9;
@@ -108,7 +121,13 @@
     </style>
 </head>
 <body>
-    <nav>
+
+    <div class="hero">
+    <h1>Welcome to My DBA Portfolio</h1>
+    <img src="photo.jpeg" alt="Harsh Verma" class="profile-photo">
+</div>
+
+<nav>
         <ul>
             <li><a href="#home">Home</a></li>
             <li><a href="#about">About</a></li>
@@ -120,65 +139,40 @@
 
     <div class="container">
         <section id="home">
-            <h1>Welcome to My DBA Portfolio</h1>
+            <h2>Introduction</h2>
             <p>Hi, I'm Harsh Verma, an SQL DBA who thrives on learning and adapting. This site showcases my 4 years in database management and how I've flexed my skills to tackle new challenges—like building this website from scratch!</p>
         </section>
 
         <section id="about">
             <h2>About Me</h2>
-            <p>As an experienced MS SQL Server DBA with 4 years of hands-on experience, I've managed critical infrastructure for payment gateways processing millions of transactions daily. Currently, at Worldline, I handle OLTP databases in the banking sector, dealing with high-volume financial transactions on critical systems. I excel in problem resolution, analytical thinking, and effective communication. What sets me apart is my flexibility: I'm always eager to learn new tools and technologies to solve problems better. For example, I've already passed the AZ-900 exam and am preparing for DP-300, while picking up basic web development to create this site—proving I can adapt quickly and apply skills across domains.</p>
-            <div class="highlight">
-                <strong>Why Flexibility Matters:</strong> In a fast-evolving tech world, DBAs need to evolve too. I've learned automation with SQL agent jobs, troubleshooting with tools like Foglight, and even front-end basics to communicate better with dev teams.
-            </div>
+            <p>As an experienced MS SQL Server DBA with 4 years of hands-on experience, I've managed critical infrastructure for payment gateways processing millions of transactions daily. Currently, at Worldline, I handle OLTP databases in the banking sector, dealing with high-volume financial transactions on critical systems. I excel in problem resolution, analytical thinking, and effective communication. What sets me apart is my flexibility: I'm always eager to learn new tools and technologies to solve problems better.</p>
+            <div class="highlight"><strong>Why Flexibility Matters:</strong> In a fast-evolving tech world, DBAs need to evolve too.</div>
         </section>
 
         <section id="skills">
             <h2>My Skills & Adaptability</h2>
-            <p>Core DBA expertise combined with a willingness to expand:</p>
             <ul>
-                <li><strong>Database Management:</strong> MS SQL Server (2022/2019/17/16/14/12), Azure Managed Instance, IaaS</li>
-                <li><strong>Performance & Optimization:</strong> Query tuning, indexing, monitoring, troubleshooting high CPU/memory/blocking issues</li>
-                <li><strong>New Skills I'm Learning:</strong> Cloud fundamentals (AZ-900 certified, preparing for DP-300), Automation (SQL agent jobs), DevOps basics</li>
-                <li><strong>Tools & Technologies:</strong> Service Now, Commvault, Sentry One, Rubrik, SSH, RDP, Foglight</li>
-                <li><strong>Soft Skills:</strong> Problem-solving, teamwork, continuous learning, multi-tasking</li>
+                <li><strong>Database Management:</strong> SQL Server, Azure MI, IaaS</li>
+                <li><strong>Performance & Optimization:</strong> Query tuning, indexing</li>
+                <li><strong>New Skills:</strong> Cloud (AZ-900), DP-300 prep, automation</li>
+                <li><strong>Tools:</strong> ServiceNow, SentryOne, Foglight, Commvault</li>
             </ul>
         </section>
 
         <section id="projects">
-            <h2>Projects & Learning in Action</h2>
-            <div class="project">
-                <h3>Worldline - Banking Sector OLTP Database</h3>
-                <p>Thrilling opportunity at Worldline, a global leader in digital payments and financial services! As an Executive DBA, I manage high-stakes OLTP databases powering critical banking operations, handling massive volumes of financial transactions with zero tolerance for downtime. This role demands precision, innovation, and rapid adaptability in a fast-paced environment, ensuring seamless performance for millions of users.</p>
-            </div>
-            <div class="project">
-                <h3>Capgemini - American Family Insurance (AmFam)</h3>
-                <p>As part of Capgemini, managed 500+ SQL Servers for production, development, and QA environments, ensuring high availability and performance for diverse payment modes.</p>
-            </div>
-            <div class="project">
-                <h3>Capgemini - Main Street America (MSA)</h3>
-                <p>At Capgemini, handled SQL patching, installations, and troubleshooting failed jobs, maintaining optimal infrastructure across multiple clients.</p>
-            </div>
-            <div class="project">
-                <h3>Capgemini - Homesite</h3>
-                <p>Worked on Homesite project at Capgemini, performing database migrations, DR drills (Always On, Mirroring, Log Shipping), and stakeholder management to prevent outages.</p>
-            </div>
-            <div class="project">
-                <h3>This Website</h3>
-                <p>Built this site using HTML/CSS to showcase my skills. A fun project to learn web basics and demonstrate adaptability beyond databases.</p>
-            </div>
+            <h2>Projects</h2>
+            <div class="project"><h3>Worldline</h3><p>Managing OLTP banking databases.</p></div>
+            <div class="project"><h3>Capgemini - AmFam</h3><p>Managed 500+ SQL Servers.</p></div>
+            <div class="project"><h3>This Website</h3><p>Built using HTML/CSS.</p></div>
         </section>
 
         <section id="Resume">
             <h2>Get in Touch</h2>
-            <p>Interested in my flexible DBA skills? Download my resume or reach out!</p>
-            <p>Email: harshverms@gmail.com | Phone: +91-7977211987 | Location: Mulund (East), Mumbai</p>
-	    <p>LinkedIn: <a href="https://www.linkedin.com/in/harsh-verma-793432187/">linkedin.com/in/Harsh</a></p>
+            <p>Email: harshverms@gmail.com | Phone: +91-7977211987</p>
             <a href="resume.pdf" download class="download-btn">Download Resume</a>
         </section>
     </div>
 
-    <footer>
-        <p>&copy; 2025 Harsh Verma.</p>
-    </footer>
+    <footer><p>&copy; 2025 Harsh Verma.</p></footer>
 </body>
 </html>
