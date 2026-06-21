@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harsh Verma — SQL Server DBA</title>
+<meta name="description" content="Harsh Verma — MS SQL Server Database Administrator. 4+ years keeping critical, high-volume banking systems fast, secure and always online.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f8fafc;
+    --bg-soft-2:#f1f5f9;
+    --text:#0f172a;
+    --text-soft:#52606d;
+    --text-faint:#8a94a3;
+    --accent:#2563eb;
+    --accent-2:#38bdf8;
+    --accent-soft:#eaf2fe;
+    --border:#e6eaf0;
+    --radius:14px;
+    --shadow-sm:0 2px 8px rgba(15,23,42,.06);
+    --shadow-md:0 12px 28px -10px rgba(15,23,42,.14);
+    --shadow-lg:0 24px 48px -16px rgba(15,23,42,.18);
+    --ease:cubic-bezier(.22,.61,.36,1);
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    color:var(--text);
+    background:var(--bg);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{max-width:100%;display:block;}
+  a{color:inherit;}
+  ul{margin:0;padding:0;}
+  section{scroll-margin-top:84px;}
+
+  /* ---------- Decorative background glow ---------- */
+  .bg-glow{
+    position:fixed;
+    inset:0;
+    z-index:-1;
+    background:
+      radial-gradient(620px 420px at 88% -6%, rgba(56,189,248,.16), transparent 60%),
+      radial-gradient(560px 380px at 6% 8%, rgba(37,99,235,.10), transparent 60%);
+    pointer-events:none;
+  }
+
+  /* ---------- Nav ---------- */
+  nav{
+    position:sticky;
+    top:0;
+    z-index:200;
+    background:rgba(255,255,255,.78);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    border-bottom:1px solid var(--border);
+  }
+  .nav-inner{
+    max-width:1140px;
+    margin:0 auto;
+    padding:16px 28px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:24px;
+  }
+  .logo{
+    font-weight:800;
+    font-size:1.28rem;
+    letter-spacing:-.02em;
+    text-decoration:none;
+    color:var(--text);
+    white-space:nowrap;
+  }
+  .logo span{color:var(--accent);}
+  .nav-links{
+    list-style:none;
+    display:flex;
+    gap:30px;
+    align-items:center;
+  }
+  .nav-links a{
+    text-decoration:none;
+    color:var(--text-soft);
+    font-weight:500;
+    font-size:.95rem;
+    position:relative;
+    padding:6px 2px;
+    transition:color .25s var(--ease);
+  }
+  .nav-links a::after{
+    content:'';
+    position:absolute;
+    left:0; right:0; bottom:-2px;
+    height:2px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    border-radius:2px;
+    transform:scaleX(0);
+    transform-origin:left;
+    transition:transform .3s var(--ease);
+  }
+  .nav-links a:hover,
+  .nav-links a.active{color:var(--text);}
+  .nav-links a:hover::after,
+  .nav-links a.active::after{transform:scaleX(1);}
+
+  .nav-right{display:flex;align-items:center;gap:18px;}
+  .status-dot-wrap{
+    display:flex;align-items:center;gap:8px;
+    font-size:.78rem;color:var(--text-faint);font-weight:500;
+    cursor:default;
+  }
+  .status-dot{
+    width:9px;height:9px;border-radius:50%;
+    background:#f59e0b;
+    box-shadow:0 0 0 0 rgba(245,158,11,.5);
+    animation:pulse-dot 2.2s infinite;
+  }
+  @keyframes pulse-dot{
+    0%{box-shadow:0 0 0 0 rgba(245,158,11,.45);}
+    70%{box-shadow:0 0 0 7px rgba(245,158,11,0);}
+    100%{box-shadow:0 0 0 0 rgba(245,158,11,0);}
+  }
+
+  .nav-toggle{
+    display:none;
+    flex-direction:column;
+    gap:5px;
+    background:none;border:none;cursor:pointer;padding:6px;
+  }
+  .nav-toggle span{width:22px;height:2px;background:var(--text);border-radius:2px;transition:.3s var(--ease);}
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:14px 26px;
+    border-radius:10px;
+    font-weight:600;
+    font-size:.96rem;
+    text-decoration:none;
+    border:1px solid transparent;
+    cursor:pointer;
+    transition:transform .25s var(--ease), box-shadow .25s var(--ease), background .25s var(--ease), color .25s var(--ease), border-color .25s var(--ease);
+  }
+  .btn-primary{
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    color:#fff;
+    box-shadow:0 10px 24px -6px rgba(37,99,235,.45);
+  }
+  .btn-primary:hover{transform:translateY(-3px);box-shadow:0 16px 30px -8px rgba(37,99,235,.5);}
+  .btn-secondary{
+    background:#fff;
+    color:var(--text);
+    border-color:var(--border);
+    box-shadow:var(--shadow-sm);
+  }
+  .btn-secondary:hover{
+    border-color:var(--accent);
+    color:var(--accent);
+    transform:translateY(-3px);
+    box-shadow:var(--shadow-md);
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    max-width:1140px;
+    margin:0 auto;
+    padding:84px 28px 70px;
+    display:grid;
+    grid-template-columns:1.15fr .85fr;
+    gap:48px;
+    align-items:center;
+  }
+  .badge{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    background:var(--accent-soft);
+    color:var(--accent);
+    font-size:.82rem;
+    font-weight:600;
+    padding:7px 14px;
+    border-radius:999px;
+    margin-bottom:22px;
+  }
+  .badge .b-dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent-2);
+    animation:pulse-dot2 2s infinite;
+  }
+  @keyframes pulse-dot2{
+    0%{box-shadow:0 0 0 0 rgba(56,189,248,.5);}
+    70%{box-shadow:0 0 0 6px rgba(56,189,248,0);}
+    100%{box-shadow:0 0 0 0 rgba(56,189,248,0);}
+  }
+  .hero h1{
+    font-size:clamp(2.1rem,4.2vw,3.05rem);
+    line-height:1.16;
+    font-weight:800;
+    letter-spacing:-.02em;
+    margin:0 0 18px;
+    color:var(--text);
+  }
+  .hero h1 .accent{
+    display:block;
+    background:linear-gradient(100deg,var(--accent) 10%,var(--accent-2) 90%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  .hero p.lead{
+    color:var(--text-soft);
+    font-size:1.05rem;
+    max-width:520px;
+    margin:0 0 32px;
+  }
+  .hero-actions{display:flex;gap:16px;flex-wrap:wrap;}
+
+  .hero-visual{
+    position:relative;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+  }
+  .photo-frame{
+    width:280px;
+    height:280px;
+    border-radius:50%;
+    padding:7px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    box-shadow:var(--shadow-lg);
+    animation:float-img 5s ease-in-out infinite;
+  }
+  .photo-frame .inner{
+    width:100%;height:100%;border-radius:50%;
+    background:#fff;padding:5px;
+  }
+  .photo-frame img{
+    width:100%;height:100%;
+    border-radius:50%;
+    object-fit:cover;
+    display:block;
+  }
+  .float-badge{
+    position:absolute;
+    bottom:14px;
+    right:6%;
+    background:#fff;
+    border:1px solid var(--border);
+    box-shadow:var(--shadow-md);
+    border-radius:999px;
+    padding:10px 18px 10px 12px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-weight:600;
+    font-size:.88rem;
+    animation:float-badge 5s ease-in-out infinite;
+  }
+  .float-badge .ic{
+    width:26px;height:26px;
+    border-radius:50%;
+    background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;
+    font-size:.9rem;
+  }
+  @keyframes float-img{
+    0%,100%{transform:translateY(0);}
+    50%{transform:translateY(-10px);}
+  }
+  @keyframes float-badge{
+    0%,100%{transform:translateY(0);}
+    50%{transform:translateY(8px);}
+  }
+
+  /* ---------- Container / sections ---------- */
+  .container{max-width:1140px;margin:0 auto;padding:0 28px;}
+  .section-pad{padding:90px 0;}
+  .section-pad.alt{background:var(--bg-soft);}
+  .eyebrow{
+    color:var(--accent);
+    font-weight:700;
+    font-size:.82rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    margin:0 0 10px;
+  }
+  .section-title{
+    font-size:clamp(1.6rem,2.6vw,2.1rem);
+    font-weight:800;
+    letter-spacing:-.01em;
+    margin:0 0 14px;
+  }
+  .section-sub{
+    color:var(--text-soft);
+    max-width:640px;
+    margin:0 0 44px;
+    font-size:1.02rem;
+  }
+
+  /* reveal-on-scroll */
+  .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease), transform .7s var(--ease);}
+  .reveal.active{opacity:1;transform:translateY(0);}
+
+  /* ---------- About ---------- */
+  .about-grid{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:start;}
+  .about-grid p{color:var(--text-soft);margin:0 0 16px;}
+  .highlight{
+    background:var(--accent-soft);
+    border-left:4px solid var(--accent);
+    border-radius:10px;
+    padding:18px 20px;
+    color:var(--text);
+    font-size:.95rem;
+  }
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  .stat-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:22px;
+    box-shadow:var(--shadow-sm);
+    transition:transform .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .stat-card:hover{transform:translateY(-4px);box-shadow:var(--shadow-md);}
+  .stat-card .num{font-size:1.7rem;font-weight:800;color:var(--accent);}
+  .stat-card .lbl{color:var(--text-soft);font-size:.86rem;margin-top:4px;}
+
+  /* ---------- Skills ---------- */
+  .skills-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
+  .skill-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:26px 22px;
+    box-shadow:var(--shadow-sm);
+    transition:transform .35s var(--ease), box-shadow .35s var(--ease), border-color .35s var(--ease);
+  }
+  .skill-card:hover{transform:translateY(-6px);box-shadow:var(--shadow-md);border-color:var(--accent-2);}
+  .skill-card .ic{
+    width:42px;height:42px;border-radius:10px;
+    background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;
+    font-size:1.2rem;margin-bottom:14px;
+  }
+  .skill-card h3{margin:0 0 10px;font-size:1.02rem;}
+  .skill-card ul{list-style:none;color:var(--text-soft);font-size:.9rem;display:flex;flex-direction:column;gap:6px;}
+  .skill-card li::before{content:'—  ';color:var(--accent-2);font-weight:700;}
+
+  /* ---------- Projects ---------- */
+  .projects-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;}
+  .project-card{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:0;
+    overflow:hidden;
+    box-shadow:var(--shadow-sm);
+    transition:transform .35s var(--ease), box-shadow .35s var(--ease);
+  }
+  .project-card:hover{transform:translateY(-6px);box-shadow:var(--shadow-md);}
+  .project-top{
+    height:6px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  }
+  .project-body{padding:24px 22px;}
+  .project-body h3{margin:0 0 8px;font-size:1.05rem;}
+  .project-body p{margin:0 0 12px;color:var(--text-soft);font-size:.92rem;}
+  .tag-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .tag{
+    background:var(--bg-soft-2);
+    color:var(--text-soft);
+    font-size:.74rem;
+    font-weight:600;
+    padding:4px 10px;
+    border-radius:999px;
+  }
+
+  /* ---------- Contact ---------- */
+  .contact-wrap{
+    display:grid;
+    grid-template-columns:1.1fr .9fr;
+    gap:40px;
+    align-items:center;
+  }
+  .contact-cards{display:flex;flex-direction:column;gap:14px;}
+  .contact-row{
+    display:flex;align-items:center;gap:14px;
+    background:#fff;border:1px solid var(--border);
+    border-radius:12px;padding:16px 18px;
+    box-shadow:var(--shadow-sm);
+    transition:transform .3s var(--ease), box-shadow .3s var(--ease);
+  }
+  .contact-row:hover{transform:translateX(4px);box-shadow:var(--shadow-md);}
+  .contact-row .ic{
+    width:38px;height:38px;border-radius:10px;
+    background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;font-size:1.05rem;flex-shrink:0;
+  }
+  .contact-row .lbl{font-size:.78rem;color:var(--text-faint);}
+  .contact-row .val{font-weight:600;font-size:.95rem;}
+  .contact-cta{
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    border-radius:var(--radius);
+    padding:38px 32px;
+    color:#fff;
+    box-shadow:var(--shadow-lg);
+  }
+  .contact-cta h3{margin:0 0 10px;font-size:1.35rem;}
+  .contact-cta p{margin:0 0 24px;color:rgba(255,255,255,.9);font-size:.95rem;}
+  .contact-cta .btn-secondary{border:none;}
+
+  footer{
+    text-align:center;
+    padding:30px 20px;
+    color:var(--text-faint);
+    font-size:.86rem;
+    border-top:1px solid var(--border);
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:980px){
+    .skills-grid{grid-template-columns:repeat(2,1fr);}
+    .projects-grid{grid-template-columns:repeat(2,1fr);}
+    .about-grid{grid-template-columns:1fr;}
+    .contact-wrap{grid-template-columns:1fr;}
+  }
+  @media (max-width:760px){
+    .nav-links{
+      position:absolute;
+      top:100%;left:0;right:0;
+      background:#fff;
+      border-bottom:1px solid var(--border);
+      flex-direction:column;
+      align-items:flex-start;
+      padding:18px 28px 22px;
+      gap:16px;
+      box-shadow:var(--shadow-md);
+      display:none;
+    }
+    .nav-links.open{display:flex;}
+    .nav-toggle{display:flex;}
+    .status-dot-wrap{display:none;}
+    .hero{grid-template-columns:1fr;padding-top:54px;text-align:center;}
+    .hero p.lead{margin-inline:auto;}
+    .hero-actions{justify-content:center;}
+    .hero-visual{order:-1;margin-bottom:10px;}
+    .skills-grid{grid-template-columns:1fr;}
+    .projects-grid{grid-template-columns:1fr;}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-glow"></div>
+
+<nav>
+  <div class="nav-inner">
+    <a href="#home" class="logo">Harsh<span>.DBA</span></a>
+    <ul class="nav-links" id="navLinks">
+      <li><a href="#home">Home</a></li>
+      <li><a href="#about">About</a></li>
+      <li><a href="#skills">Skills</a></li>
+      <li><a href="#projects">Projects</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ul>
+    <div class="nav-right">
+      <div class="status-dot-wrap" title="Open to new opportunities">
+        <span class="status-dot"></span> Open to work
+      </div>
+      <button class="nav-toggle" id="navToggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<header id="home" class="hero">
+  <div class="hero-text">
+    <span class="badge"><span class="b-dot"></span>Available — SQL Server DBA</span>
+    <h1>Hi, I'm Harsh Verma<span class="accent">SQL Server Database Administrator</span></h1>
+    <p class="lead">4+ years keeping critical, high-volume banking systems fast, secure, and always online — from OLTP performance tuning to disaster recovery.</p>
+    <div class="hero-actions">
+      <a href="#projects" class="btn btn-primary">View My Work</a>
+      <a href="resume.pdf" download class="btn btn-secondary">↓ Download Resume</a>
+    </div>
+  </div>
+  <div class="hero-visual">
+    <div class="photo-frame">
+      <div class="inner">
+        <img src="photo.jpeg" alt="Harsh Verma">
+      </div>
+    </div>
+    <div class="float-badge"><span class="ic">🗄️</span>Harsh Verma</div>
+  </div>
+</header>
+
+<main>
+
+  <section id="about" class="section-pad">
+    <div class="container">
+      <p class="eyebrow reveal">Who I am</p>
+      <h2 class="section-title reveal">About Me</h2>
+      <div class="about-grid">
+        <div class="reveal">
+          <p>As an experienced MS SQL Server DBA with 4+ years of hands-on experience, I've managed critical infrastructure for payment gateways processing millions of transactions daily. Currently at Worldline, I handle OLTP databases in the banking sector, working with high-volume financial transactions on systems that simply cannot go down.</p>
+          <p>I excel in problem resolution, analytical thinking and clear communication under pressure. What sets me apart is flexibility — I'm always learning new tools and cloud technologies to solve problems better, faster, and at scale.</p>
+          <div class="highlight">
+            <strong>Why flexibility matters:</strong> in a fast-evolving tech world, DBAs need to evolve too — that's why I'm actively building toward cloud data platforms alongside my on-prem foundation.
+          </div>
+        </div>
+        <div class="stat-grid reveal">
+          <div class="stat-card"><div class="num">4+</div><div class="lbl">Years of Experience</div></div>
+          <div class="stat-card"><div class="num">500+</div><div class="lbl">SQL Servers Managed</div></div>
+          <div class="stat-card"><div class="num">3</div><div class="lbl">Companies, Banking &amp; Fintech</div></div>
+          <div class="stat-card"><div class="num">24/7</div><div class="lbl">Critical OLTP Uptime</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="skills" class="section-pad alt">
+    <div class="container">
+      <p class="eyebrow reveal">What I work with</p>
+      <h2 class="section-title reveal">Skills &amp; Adaptability</h2>
+      <p class="section-sub reveal">A blend of solid on-prem database fundamentals and a growing cloud skill set.</p>
+      <div class="skills-grid">
+        <div class="skill-card reveal">
+          <div class="ic">🗃️</div>
+          <h3>Database Management</h3>
+          <ul><li>SQL Server</li><li>Azure SQL Managed Instance</li><li>Azure IaaS</li></ul>
+        </div>
+        <div class="skill-card reveal">
+          <div class="ic">⚡</div>
+          <h3>Performance &amp; Optimization</h3>
+          <ul><li>Query tuning</li><li>Indexing strategy</li><li>Execution plan analysis</li></ul>
+        </div>
+        <div class="skill-card reveal">
+          <div class="ic">☁️</div>
+          <h3>Cloud &amp; Emerging Tech</h3>
+          <ul><li>DP-300 Certified</li><li>AZ-900 Certified</li><li>Automation scripting</li></ul>
+        </div>
+        <div class="skill-card reveal">
+          <div class="ic">🛠️</div>
+          <h3>Tools</h3>
+          <ul><li>ServiceNow</li><li>SentryOne &amp; Foglight</li><li>Commvault</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="projects" class="section-pad">
+    <div class="container">
+      <p class="eyebrow reveal">Where I've worked</p>
+      <h2 class="section-title reveal">Projects</h2>
+      <p class="section-sub reveal">Real production environments — not sandboxes.</p>
+      <div class="projects-grid">
+        <div class="project-card reveal">
+          <div class="project-top"></div>
+          <div class="project-body">
+            <h3>Worldline</h3>
+            <p>Managing critical OLTP banking databases supporting high-volume payment gateway transactions.</p>
+            <div class="tag-row"><span class="tag">SQL Server</span><span class="tag">OLTP</span><span class="tag">Banking</span></div>
+          </div>
+        </div>
+        <div class="project-card reveal">
+          <div class="project-top"></div>
+          <div class="project-body">
+            <h3>Capgemini — AmFam</h3>
+            <p>Administered and supported 500+ SQL Server instances across a large enterprise estate.</p>
+            <div class="tag-row"><span class="tag">SQL Server</span><span class="tag">Enterprise Scale</span></div>
+          </div>
+        </div>
+        <div class="project-card reveal">
+          <div class="project-top"></div>
+          <div class="project-body">
+            <h3>This Website</h3>
+            <p>Designed and built from scratch with HTML, CSS &amp; JavaScript to showcase my work.</p>
+            <div class="tag-row"><span class="tag">HTML/CSS</span><span class="tag">JavaScript</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="section-pad alt">
+    <div class="container">
+      <p class="eyebrow reveal">Get in touch</p>
+      <h2 class="section-title reveal">Contact</h2>
+      <p class="section-sub reveal">Open to Azure DBA and cloud data roles — let's talk.</p>
+      <div class="contact-wrap">
+        <div class="contact-cards reveal">
+          <div class="contact-row">
+            <span class="ic">✉️</span>
+            <div><div class="lbl">Email</div><div class="val">harshverms@gmail.com</div></div>
+          </div>
+          <div class="contact-row">
+            <span class="ic">📞</span>
+            <div><div class="lbl">Phone</div><div class="val">+91-7977211987</div></div>
+          </div>
+          <div class="contact-row">
+            <span class="ic">📍</span>
+            <div><div class="lbl">Based in</div><div class="val">India</div></div>
+          </div>
+        </div>
+        <div class="contact-cta reveal">
+          <h3>Let's build something reliable.</h3>
+          <p>Download my resume for the full picture, or drop me an email directly.</p>
+          <a href="resume.pdf" download class="btn btn-secondary">↓ Download Resume</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>&copy; <span id="year"></span> Harsh Verma. Built with HTML, CSS &amp; JavaScript.</p>
+</footer>
+
+<script>
+  // Footer year
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  // Mobile nav toggle
+  const navToggle = document.getElementById('navToggle');
+  const navLinks = document.getElementById('navLinks');
+  navToggle.addEventListener('click', () => navLinks.classList.toggle('open'));
+  navLinks.querySelectorAll('a').forEach(a => a.addEventListener('click', () => navLinks.classList.remove('open')));
+
+  // Scroll-reveal animation
+  const revealEls = document.querySelectorAll('.reveal');
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('active');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  revealEls.forEach(el => revealObserver.observe(el));
+
+  // Active nav link on scroll
+  const sections = document.querySelectorAll('main section, header#home');
+  const navAnchors = document.querySelectorAll('.nav-links a');
+  const navObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navAnchors.forEach(a => a.classList.remove('active'));
+        const match = document.querySelector('.nav-links a[href="#' + entry.target.id + '"]');
+        if (match) match.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-45% 0px -45% 0px' });
+  sections.forEach(s => navObserver.observe(s));
+</script>
+
+</body>
+</html>
