@@ -1,0 +1,15 @@
+-- Find currently blocking and blocked sessions
+SELECT
+    blocking.session_id AS blocking_session_id,
+    blocked.session_id AS blocked_session_id,
+    waitstats.wait_type,
+    waitstats.wait_duration_ms,
+    blocked_sql.text AS blocked_sql_text
+FROM sys.dm_exec_sessions blocked
+JOIN sys.dm_os_waiting_tasks waitstats
+    ON blocked.session_id = waitstats.session_id
+JOIN sys.dm_exec_sessions blocking
+    ON waitstats.blocking_session_id = blocking.session_id
+CROSS APPLY sys.dm_exec_sql_text(
+    (SELECT sql_handle FROM sys.dm_exec_requests WHERE session_id = blocked.session_id)
+) blocked_sql;

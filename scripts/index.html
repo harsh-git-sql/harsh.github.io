@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scripts — Harsh Verma</title>
+<meta name="description" content="SQL Server scripts and snippets for quick copy-paste reference.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff;
+    --bg-soft:#f8fafc;
+    --bg-soft-2:#f1f5f9;
+    --text:#0f172a;
+    --text-soft:#52606d;
+    --text-faint:#8a94a3;
+    --accent:#2563eb;
+    --accent-2:#38bdf8;
+    --accent-soft:#eaf2fe;
+    --border:#e6eaf0;
+    --radius:14px;
+    --shadow-sm:0 2px 8px rgba(15,23,42,.06);
+    --shadow-md:0 12px 28px -10px rgba(15,23,42,.14);
+    --code-bg:#0f172a;
+    --code-bg-2:#16213a;
+    --code-text:#e2e8f0;
+    --ease:cubic-bezier(.22,.61,.36,1);
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    color:var(--text);
+    background:var(--bg);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;}
+  ul{margin:0;padding:0;}
+
+  .bg-glow{
+    position:fixed;
+    inset:0;
+    z-index:-1;
+    background:
+      radial-gradient(620px 420px at 88% -6%, rgba(56,189,248,.16), transparent 60%),
+      radial-gradient(560px 380px at 6% 8%, rgba(37,99,235,.10), transparent 60%);
+    pointer-events:none;
+  }
+
+  /* ---------- Nav (mirrors homepage) ---------- */
+  nav{
+    position:sticky;
+    top:0;
+    z-index:200;
+    background:rgba(255,255,255,.78);
+    backdrop-filter:blur(14px) saturate(160%);
+    -webkit-backdrop-filter:blur(14px) saturate(160%);
+    border-bottom:1px solid var(--border);
+  }
+  .nav-inner{
+    max-width:1140px;
+    margin:0 auto;
+    padding:16px 28px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:24px;
+  }
+  .logo{
+    font-weight:800;
+    font-size:1.28rem;
+    letter-spacing:-.02em;
+    text-decoration:none;
+    color:var(--text);
+    white-space:nowrap;
+  }
+  .logo span{color:var(--accent);}
+  .back-link{
+    text-decoration:none;
+    color:var(--text-soft);
+    font-weight:500;
+    font-size:.92rem;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    transition:color .25s var(--ease);
+  }
+  .back-link:hover{color:var(--accent);}
+
+  /* ---------- Page header ---------- */
+  .page-head{
+    max-width:1140px;
+    margin:0 auto;
+    padding:56px 28px 36px;
+  }
+  .eyebrow{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    color:var(--accent);
+    font-weight:600;
+    font-size:.82rem;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    margin:0 0 14px;
+  }
+  .eyebrow::before{
+    content:'';
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent-2);
+  }
+  .page-head h1{
+    font-size:clamp(1.8rem,3.4vw,2.5rem);
+    font-weight:800;
+    letter-spacing:-.02em;
+    margin:0 0 14px;
+  }
+  .page-head p{
+    color:var(--text-soft);
+    font-size:1.02rem;
+    max-width:620px;
+    margin:0;
+  }
+
+  /* ---------- Search ---------- */
+  .toolbar{
+    max-width:1140px;
+    margin:0 auto;
+    padding:0 28px 8px;
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .search-box{
+    flex:1;
+    min-width:240px;
+    position:relative;
+  }
+  .search-box input{
+    width:100%;
+    padding:13px 16px 13px 42px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:var(--bg-soft);
+    font-family:inherit;
+    font-size:.95rem;
+    color:var(--text);
+    outline:none;
+    transition:border-color .25s var(--ease), background .25s var(--ease);
+  }
+  .search-box input:focus{
+    border-color:var(--accent);
+    background:#fff;
+  }
+  .search-box .ic{
+    position:absolute;
+    left:14px;top:50%;
+    transform:translateY(-50%);
+    color:var(--text-faint);
+    font-size:.95rem;
+    pointer-events:none;
+  }
+
+  /* ---------- Main grid ---------- */
+  .main-wrap{
+    max-width:1140px;
+    margin:0 auto;
+    padding:24px 28px 90px;
+  }
+  .snippet-list{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+  }
+  .snippet-card{
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    background:#fff;
+    box-shadow:var(--shadow-sm);
+    overflow:hidden;
+    transition:box-shadow .25s var(--ease), transform .25s var(--ease);
+  }
+  .snippet-card:hover{box-shadow:var(--shadow-md);}
+  .snippet-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:14px;
+    padding:16px 20px;
+    flex-wrap:wrap;
+  }
+  .snippet-meta h3{
+    margin:0 0 6px;
+    font-size:1.04rem;
+    font-weight:700;
+  }
+  .tag-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .tag{
+    background:var(--accent-soft);
+    color:var(--accent);
+    font-size:.74rem;
+    font-weight:600;
+    padding:3px 10px;
+    border-radius:999px;
+  }
+  .copy-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:9px 16px;
+    border-radius:8px;
+    border:1px solid var(--border);
+    background:var(--bg-soft);
+    color:var(--text);
+    font-family:inherit;
+    font-weight:600;
+    font-size:.86rem;
+    cursor:pointer;
+    transition:all .2s var(--ease);
+    white-space:nowrap;
+  }
+  .copy-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .copy-btn.copied{
+    background:#dcfce7;
+    border-color:#86efac;
+    color:#15803d;
+  }
+  .code-wrap{
+    background:var(--code-bg);
+    background-image:linear-gradient(180deg, var(--code-bg-2), var(--code-bg));
+    margin:0 16px 16px;
+    border-radius:10px;
+    overflow:hidden;
+  }
+  .code-wrap pre{
+    margin:0;
+    padding:18px 20px;
+    overflow-x:auto;
+    font-family:'JetBrains Mono','Courier New',monospace;
+    font-size:.84rem;
+    line-height:1.65;
+    color:var(--code-text);
+    white-space:pre;
+  }
+
+  .state-msg{
+    text-align:center;
+    color:var(--text-faint);
+    padding:50px 20px;
+    font-size:.95rem;
+  }
+
+  footer{
+    text-align:center;
+    padding:30px 28px 40px;
+    color:var(--text-faint);
+    font-size:.85rem;
+    border-top:1px solid var(--border);
+  }
+
+  @media (max-width:640px){
+    .snippet-top{flex-direction:column;align-items:flex-start;}
+    .copy-btn{width:100%;justify-content:center;}
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-glow"></div>
+
+<nav>
+  <div class="nav-inner">
+    <a href="../index.html#home" class="logo">Harsh<span>.DBA</span></a>
+    <a href="../index.html" class="back-link">← Back to home</a>
+  </div>
+</nav>
+
+<div class="page-head">
+  <p class="eyebrow">Quick reference</p>
+  <h1>Scripts</h1>
+  <p>A running library of SQL Server snippets I reach for often — copy, paste, adapt.</p>
+</div>
+
+<div class="toolbar">
+  <div class="search-box">
+    <span class="ic">🔍</span>
+    <input id="searchInput" type="text" placeholder="Search by title or tag…">
+  </div>
+</div>
+
+<div class="main-wrap">
+  <div id="snippetList" class="snippet-list">
+    <p class="state-msg">Loading scripts…</p>
+  </div>
+</div>
+
+<footer>
+  &copy; <span id="year"></span> Harsh Verma — Scripts library
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  const listEl = document.getElementById('snippetList');
+  const searchInput = document.getElementById('searchInput');
+  let allSnippets = [];
+
+  function escapeHtml(str){
+    return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render(snippets){
+    if(!snippets.length){
+      listEl.innerHTML = '<p class="state-msg">No scripts match your search.</p>';
+      return;
+    }
+    listEl.innerHTML = snippets.map((s, i) => `
+      <div class="snippet-card">
+        <div class="snippet-top">
+          <div class="snippet-meta">
+            <h3>${escapeHtml(s.title)}</h3>
+            <div class="tag-row">${(s.tags||[]).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+          </div>
+          <button class="copy-btn" data-index="${i}">📋 Copy</button>
+        </div>
+        <div class="code-wrap"><pre id="code-${i}">Loading…</pre></div>
+      </div>
+    `).join('');
+
+    snippets.forEach((s, i) => {
+      fetch(s.file)
+        .then(r => { if(!r.ok) throw new Error('not found'); return r.text(); })
+        .then(text => {
+          document.getElementById('code-' + i).textContent = text;
+          s._content = text;
+        })
+        .catch(() => {
+          document.getElementById('code-' + i).textContent = '// Could not load ' + s.file;
+        });
+    });
+
+    document.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const i = btn.dataset.index;
+        const text = document.getElementById('code-' + i).textContent;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.classList.add('copied');
+          btn.textContent = '✓ Copied';
+          setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.textContent = '📋 Copy';
+          }, 1600);
+        });
+      });
+    });
+  }
+
+  fetch('manifest.json')
+    .then(r => r.json())
+    .then(data => {
+      allSnippets = data;
+      render(allSnippets);
+    })
+    .catch(() => {
+      listEl.innerHTML = '<p class="state-msg">Could not load manifest.json — check the file is present in this folder.</p>';
+    });
+
+  searchInput.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    if(!q){ render(allSnippets); return; }
+    const filtered = allSnippets.filter(s =>
+      s.title.toLowerCase().includes(q) ||
+      (s.tags||[]).some(t => t.toLowerCase().includes(q))
+    );
+    render(filtered);
+  });
+</script>
+
+</body>
+</html>
