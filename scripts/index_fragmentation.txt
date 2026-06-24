@@ -1,1 +1,155 @@
-a
+/*=================================================================================
+  INDEX FRAGMENTATION ANALYZER (Production-DB)
+  ---------------------------------------------------------------------------------
+  PURPOSE : Find fragmented indexes and get an ACTIONABLE recommendation
+            (REORGANIZE / REBUILD / IGNORE) with ready-to-review commands.
+
+  SCOPE   : SECTION A = CURRENT DATABASE (the workhorse).
+            SECTION B = INSTANCE-WIDE summary (which DB needs the most attention).
+
+  READ-ONLY: Only reads DMVs/catalog views and generates command TEXT.
+             It does NOT rebuild/reorganize anything. You review & decide.
+
+  ⚠ PRODUCTION CAVEATS (read before acting):
+     - Uses 'LIMITED' scan mode = fast & low-impact (safe to run in prod).
+       'SAMPLED'/'DETAILED' are far heavier — avoid on busy servers.
+     - SMALL indexes (< 1000 pages / ~8MB) are EXCLUDED — fragmentation there is
+       irrelevant and rebuilding wastes resources.
+     - REBUILD on Standard Edition is OFFLINE (locks the table). Schedule in a
+       maintenance window. ONLINE rebuild = Enterprise only.
+     - REBUILD updates statistics with fullscan; REORGANIZE does NOT — update
+       stats separately after reorganize if needed.
+     - Run during low-activity periods; even LIMITED scan adds some I/O.
+
+  THRESHOLDS USED:
+     < 10%      -> IGNORE (not worth it)
+     10% - 30%  -> REORGANIZE (lightweight, online, resumable)
+     > 30%      -> REBUILD (thorough, heavier)
+=================================================================================*/
+
+
+/*=================================================================================
+  SECTION A : CURRENT DATABASE  (the workhorse — run inside the DB you maintain)
+  ---------------------------------------------------------------------------------
+  Lists fragmented indexes worth acting on, with a recommendation and a
+  ready-to-review command for each.
+=================================================================================*/
+USE [YourDatabaseName];   -- 👈 change to the database you're maintaining
+GO
+
+SELECT
+    DB_NAME()                               AS database_name,
+    s.name                                  AS schema_name,
+    t.name                                  AS table_name,
+    i.name                                  AS index_name,
+    i.type_desc                             AS index_type,
+
+    -- ===== The numbers that drive the decision =====
+    CAST(ps.avg_fragmentation_in_percent AS DECIMAL(5,2)) AS frag_percent,
+    ps.page_count,
+    CAST(ps.page_count * 8.0 / 1024 AS DECIMAL(20,2))     AS size_mb,
+    ps.avg_page_space_used_in_percent       AS page_fullness_pct,
+
+    -- ===== The recommendation =====
+    CASE
+        WHEN ps.avg_fragmentation_in_percent > 30 THEN 'REBUILD'
+        WHEN ps.avg_fragmentation_in_percent >= 10 THEN 'REORGANIZE'
+        ELSE 'IGNORE'
+    END                                     AS recommendation,
+
+    -- ===== Ready-to-review command =====
+    CASE
+        WHEN ps.avg_fragmentation_in_percent > 30 THEN
+            'ALTER INDEX ' + QUOTENAME(i.name) + ' ON '
+            + QUOTENAME(s.name) + '.' + QUOTENAME(t.name)
+            + ' REBUILD WITH (SORT_IN_TEMPDB = ON);'
+            -- add ONLINE = ON for Enterprise edition + online maintenance window
+        WHEN ps.avg_fragmentation_in_percent >= 10 THEN
+            'ALTER INDEX ' + QUOTENAME(i.name) + ' ON '
+            + QUOTENAME(s.name) + '.' + QUOTENAME(t.name)
+            + ' REORGANIZE;'
+        ELSE NULL
+    END                                     AS maintenance_command
+FROM sys.dm_db_index_physical_stats
+        (DB_ID(), NULL, NULL, NULL, 'LIMITED') AS ps   -- LIMITED = fast & low-impact
+JOIN sys.indexes      AS i ON ps.object_id = i.object_id AND ps.index_id = i.index_id
+JOIN sys.tables       AS t ON i.object_id = t.object_id
+JOIN sys.schemas      AS s ON t.schema_id = s.schema_id
+WHERE ps.avg_fragmentation_in_percent >= 10   -- skip already-fine indexes
+  AND ps.page_count > 1000                     -- skip tiny indexes (~8MB) — not worth it
+  AND i.index_id > 0                           -- skip heaps (index_id 0)
+  AND i.is_disabled = 0                        -- skip disabled indexes
+ORDER BY ps.avg_fragmentation_in_percent DESC;
+GO
+
+
+/*=================================================================================
+  SECTION B : INSTANCE-WIDE SUMMARY  (which database needs attention?)
+  ---------------------------------------------------------------------------------
+  Quick triage across all user DBs — counts how many indexes need rebuild vs
+  reorganize per database. Use this to decide where to focus, then run Section A
+  in that database for the detailed, actionable list.
+
+  NOTE: This loops databases using a cursor (read-only). It runs LIMITED scans,
+        so it's prod-safe, but on servers with MANY large DBs it can take a while.
+=================================================================================*/
+SET NOCOUNT ON;
+
+DECLARE @results TABLE
+(
+    database_name SYSNAME,
+    needs_rebuild   INT,
+    needs_reorganize INT,
+    worst_frag_pct  DECIMAL(5,2),
+    total_size_mb   DECIMAL(20,2)
+);
+
+DECLARE @dbname SYSNAME;
+DECLARE @sql NVARCHAR(MAX);
+
+DECLARE db_cursor CURSOR LOCAL FAST_FORWARD FOR
+    SELECT name FROM sys.databases
+    WHERE database_id > 4               -- skip system DBs
+      AND state_desc = 'ONLINE';        -- only online DBs
+
+OPEN db_cursor;
+FETCH NEXT FROM db_cursor INTO @dbname;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @sql = N'
+        USE ' + QUOTENAME(@dbname) + N';
+        SELECT
+            DB_NAME(),
+            SUM(CASE WHEN ps.avg_fragmentation_in_percent > 30 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN ps.avg_fragmentation_in_percent BETWEEN 10 AND 30 THEN 1 ELSE 0 END),
+            CAST(MAX(ps.avg_fragmentation_in_percent) AS DECIMAL(5,2)),
+            CAST(SUM(ps.page_count) * 8.0 / 1024 AS DECIMAL(20,2))
+        FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, ''LIMITED'') AS ps
+        JOIN sys.indexes i ON ps.object_id = i.object_id AND ps.index_id = i.index_id
+        WHERE ps.avg_fragmentation_in_percent >= 10
+          AND ps.page_count > 1000
+          AND i.index_id > 0
+          AND i.is_disabled = 0;';
+
+    BEGIN TRY
+        INSERT INTO @results
+        EXEC sp_executesql @sql;
+    END TRY
+    BEGIN CATCH
+        -- skip DBs we can't read (permissions, state) without failing the whole loop
+    END CATCH
+
+    FETCH NEXT FROM db_cursor INTO @dbname;
+END
+
+CLOSE db_cursor;
+DEALLOCATE db_cursor;
+
+SELECT *
+FROM @results
+WHERE needs_rebuild > 0 OR needs_reorganize > 0   -- only DBs needing work
+ORDER BY needs_rebuild DESC, needs_reorganize DESC;
+
+SET NOCOUNT OFF;
+GO
