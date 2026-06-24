@@ -1,10 +1,20 @@
--- Check last backup time for all databases on the instance
 SELECT
     d.name AS database_name,
-    MAX(b.backup_finish_date) AS last_backup_time,
-    DATEDIFF(HOUR, MAX(b.backup_finish_date), GETDATE()) AS hours_since_backup
+    d.recovery_model_desc AS recovery_model,
+
+    -- ===== FULL backup (type = 'D') =====
+    MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END) AS last_full_backup,
+    DATEDIFF(HOUR, MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END), GETDATE()) AS hours_since_full,
+
+    -- ===== DIFFERENTIAL backup (type = 'I') =====
+    MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END) AS last_diff_backup,
+    DATEDIFF(HOUR, MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END), GETDATE()) AS hours_since_diff,
+
+    -- ===== LOG backup (type = 'L') =====
+    MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END) AS last_log_backup,
+    DATEDIFF(MINUTE, MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END), GETDATE()) AS minutes_since_log
 FROM sys.databases d
 LEFT JOIN msdb.dbo.backupset b
-    ON d.name = b.database_name AND b.type = 'D'
-GROUP BY d.name
-ORDER BY hours_since_backup DESC;
+    ON d.name = b.database_name
+GROUP BY d.name, d.recovery_model_desc
+ORDER BY d.name;
