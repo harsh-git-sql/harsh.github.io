@@ -1,1 +1,172 @@
-a
+USE [your local db] --not a production database
+GO
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*=================================================================================
+  Process_monitor_v2  (Lightweight Quick Monitor — same 3-window layout)
+  ---------------------------------------------------------------------------------
+  PURPOSE : Fast, READ-ONLY production triage. Retains the familiar 3 windows:
+     WINDOW 1 : Active running queries (by CPU) + client IP + object name
+     WINDOW 2 : Blocking — LEAD blocker clearly flagged & sorted to top
+     WINDOW 3 : Long-running queries (by elapsed time)
+
+ 
+  SAFETY : 100% READ-ONLY once deployed. No temp tables, no INSERT/UPDATE/DELETE,
+           no dynamic EXEC, no DBCC. Only SELECTs from DMVs.
+
+  NOTES  : CREATE OR ALTER = SQL 2016+. For older: DROP + CREATE PROCEDURE.
+           STRING_AGG not used here, so it's compatible back to SQL 2012.
+           Requires VIEW SERVER STATE.
+=================================================================================*/
+CREATE OR ALTER PROCEDURE [dbo].[Process_monitor_v2]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @lognumber VARCHAR(100) =
+        'log' + CAST(CAST(RAND()*1000000 AS INT) AS VARCHAR(50));
+
+    /*=============================================================================
+      WINDOW 1 : ACTIVE RUNNING QUERIES  (sorted by CPU)
+      Includes client_ip (where it's coming from) and object_name (what it's hitting)
+      for instant "identify the culprit" info during a fire.
+    =============================================================================*/
+    SELECT
+        r.session_id                         AS spid,
+        c.client_net_address                 AS client_ip,        -- source IP
+        -- object/proc the statement belongs to (NULL for ad-hoc/dynamic SQL)
+        OBJECT_SCHEMA_NAME(st.objectid, st.dbid) + '.'
+            + OBJECT_NAME(st.objectid, st.dbid)  AS object_name,
+        SUBSTRING(st.text,                                       -- actual running statement
+                  (r.statement_start_offset/2)+1,
+                  ((CASE r.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(st.text)
+                        ELSE r.statement_end_offset END
+                    - r.statement_start_offset)/2)+1) AS Eventinfo,
+        r.blocking_session_id                AS blocked,
+        r.wait_type                          AS waittype,
+        r.last_wait_type                     AS lastwaittype,
+        r.open_transaction_count             AS open_tran,
+        DB_NAME(r.database_id)               AS Dbname,
+        r.cpu_time                           AS cpu,
+        r.reads + r.writes                   AS physical_io,
+        s.login_time,
+        s.last_request_start_time            AS last_batch,
+        s.host_name                          AS hostname,
+        s.program_name,
+        s.login_name                         AS loginame,
+        @lognumber                           AS lognumber,
+        r.command                            AS cmd,
+        GETDATE()                            AS Collection_date,
+        r.wait_resource                      AS waitresource,
+        r.wait_time                          AS waittime,
+        r.sql_handle                         AS SQL_Handle
+    FROM sys.dm_exec_requests AS r
+    JOIN sys.dm_exec_sessions AS s ON r.session_id = s.session_id
+    LEFT JOIN sys.dm_exec_connections AS c ON r.session_id = c.session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+    WHERE s.is_user_process = 1
+      AND r.session_id <> @@SPID
+      AND r.command NOT LIKE '%awaiting%'
+      AND r.last_wait_type NOT IN
+          ('LATCH_EX','SP_SERVER_DIAGNOSTICS_SLEEP','CXPACKET',
+           'BROKER_RECEIVE_WAITFOR')
+    ORDER BY r.cpu_time DESC;
+
+    /*=============================================================================
+      WINDOW 2 : BLOCKING  (lead blocker flagged — the key improvement)
+      One clean view: each blocked session, who's blocking it, and a role flag
+      marking the LEAD (root) blocker. Lead blockers sort to the TOP, ordered by
+      how many they block — so the first row(s) tell you exactly what to kill.
+    =============================================================================*/
+    SELECT
+        CASE
+            WHEN r.blocking_session_id NOT IN
+                 (SELECT session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0)
+            THEN '>>> LEAD BLOCKER <<<'
+            ELSE 'blocked'
+        END                                  AS blocker_role,
+        r.blocking_session_id                AS blocker_spid,
+        -- how many sessions this blocker is blocking (impact)
+        (SELECT COUNT(*) FROM sys.dm_exec_requests r2
+         WHERE r2.blocking_session_id = r.blocking_session_id) AS blocking_count,
+        r.session_id                         AS blocked_spid,
+        bc.client_net_address                AS blocker_ip,       -- source of the blocker
+        DB_NAME(r.database_id)               AS Dbname,
+        r.wait_type                          AS waittype,
+        r.wait_time                          AS waittime,
+        r.wait_resource                      AS waitresource,
+        s.login_name                         AS loginame,
+        s.host_name                          AS hostname,
+        s.program_name,
+        -- text of the BLOCKED session's statement
+        SUBSTRING(st.text,
+                  (r.statement_start_offset/2)+1,
+                  ((CASE r.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(st.text)
+                        ELSE r.statement_end_offset END
+                    - r.statement_start_offset)/2)+1) AS blocked_sql,
+        -- last command of the BLOCKER (works even if blocker is sleeping)
+        bst.text                             AS blocker_last_sql
+    FROM sys.dm_exec_requests AS r
+    JOIN sys.dm_exec_sessions AS s  ON r.session_id = s.session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+    LEFT JOIN sys.dm_exec_connections AS bc ON r.blocking_session_id = bc.session_id
+    OUTER APPLY sys.dm_exec_sql_text(bc.most_recent_sql_handle) AS bst
+    WHERE r.blocking_session_id <> 0
+    ORDER BY
+        -- lead blockers first, then by how many they block
+        CASE WHEN r.blocking_session_id NOT IN
+                  (SELECT session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0)
+             THEN 0 ELSE 1 END,
+        blocking_count DESC,
+        r.blocking_session_id;
+
+    /*=============================================================================
+      WINDOW 3 : LONG-RUNNING QUERIES  (by elapsed time)
+      Catches stuck / runaway queries even if low CPU (blocked, IO waits, etc.).
+      percent_complete shows progress for backups/restores/index rebuilds/DBCC.
+    =============================================================================*/
+    SELECT
+        r.session_id                         AS spid,
+        c.client_net_address                 AS client_ip,        -- source IP
+        OBJECT_SCHEMA_NAME(st.objectid, st.dbid) + '.'
+            + OBJECT_NAME(st.objectid, st.dbid)  AS object_name,
+        SUBSTRING(st.text,
+                  (r.statement_start_offset/2)+1,
+                  ((CASE r.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(st.text)
+                        ELSE r.statement_end_offset END
+                    - r.statement_start_offset)/2)+1) AS Eventinfo,
+        r.blocking_session_id                AS blocked,
+        CAST(r.total_elapsed_time/1000.0 AS DECIMAL(20,1)) AS elapsed_sec,
+        CAST(r.cpu_time/1000.0 AS DECIMAL(20,1))           AS cpu_sec,
+        r.wait_type                          AS waittype,
+        r.last_wait_type                     AS lastwaittype,
+        r.open_transaction_count             AS open_tran,
+        DB_NAME(r.database_id)               AS Dbname,
+        r.reads + r.writes                   AS physical_io,
+        s.login_time,
+        s.last_request_start_time            AS last_batch,
+        s.host_name                          AS hostname,
+        s.program_name,
+        s.login_name                         AS loginame,
+        r.percent_complete,
+        r.command                            AS cmd,
+        GETDATE()                            AS Collection_date,
+        r.wait_resource                      AS waitresource,
+        r.sql_handle                         AS SQL_Handle
+    FROM sys.dm_exec_requests AS r
+    JOIN sys.dm_exec_sessions AS s ON r.session_id = s.session_id
+    LEFT JOIN sys.dm_exec_connections AS c ON r.session_id = c.session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+    WHERE s.is_user_process = 1
+      AND r.session_id <> @@SPID
+      AND r.command NOT LIKE '%awaiting%'
+    ORDER BY r.total_elapsed_time DESC;
+
+END
+GO
