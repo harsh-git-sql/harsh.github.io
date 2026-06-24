@@ -1,1 +1,156 @@
-a
+/*=================================================================================
+  MISSING INDEX FINDER (Production-DB)
+  ---------------------------------------------------------------------------------
+  PURPOSE : Identify high-value missing indexes from SQL Server's DMVs
+
+  SCOPE   : SECTION A = CURRENT DATABASE only (the workhorse — run inside the DB
+                        you're tuning).
+            SECTION B = INSTANCE-WIDE triage (find which DB hurts most, then
+                        drill into it with Section A).
+
+  READ-ONLY: Only SELECTs from DMVs. Generates CREATE INDEX *suggestions* as text
+             — it does NOT create anything. You review & decide.
+
+  ⚠ CRITICAL CAVEATS (read before acting):
+     - DMV data RESETS on SQL restart. Check uptime (shown below). Low uptime =
+       not enough workload captured = don't trust the numbers yet.
+     - The "impact" score is a GUIDE, not a guarantee. Always validate against
+       the actual query workload before creating.
+     - SQL's suggested INCLUDE columns can be excessive. Trim them — wide indexes
+       cost storage + slow writes.
+     - Check for EXISTING/overlapping indexes before creating (avoid duplicates).
+=================================================================================*/
+
+
+/*---------------------------------------------------------------------------------
+  SERVER UPTIME CHECK — how long has the DMV data been accumulating?
+  The longer the uptime, the more trustworthy the missing-index stats.
+  Rule of thumb: < 1 week uptime -> treat results as preliminary.
+---------------------------------------------------------------------------------*/
+SELECT
+    sqlserver_start_time,
+    DATEDIFF(DAY,  sqlserver_start_time, GETDATE()) AS uptime_days,
+    DATEDIFF(HOUR, sqlserver_start_time, GETDATE()) AS uptime_hours
+FROM sys.dm_os_sys_info;
+GO
+
+
+/*=================================================================================
+  SECTION A : CURRENT DATABASE  (the workhorse — run inside the DB you're tuning)
+  ---------------------------------------------------------------------------------
+  Ranked by a realistic impact score that combines:
+     seeks/scans (how often it'd be used)
+   * avg_user_impact (% query cost reduction)
+   * usage since last restart
+  Higher impact_score = bigger potential win.
+=================================================================================*/
+USE [YourDatabaseName];   -- 👈 change to the database you're tuning
+GO
+
+SELECT
+    DB_NAME(mid.database_id)                AS database_name,
+    OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id) AS schema_name,
+    OBJECT_NAME(mid.object_id, mid.database_id)        AS table_name,
+
+    -- ===== The impact score (the number that matters) =====
+    CAST(migs.avg_total_user_cost
+         * migs.avg_user_impact
+         * (migs.user_seeks + migs.user_scans) AS DECIMAL(20,2)) AS impact_score,
+
+    -- ===== Supporting evidence =====
+    migs.user_seeks,
+    migs.user_scans,
+    migs.avg_user_impact            AS avg_pct_improvement,   -- est. % query cost drop
+    migs.avg_total_user_cost        AS avg_query_cost,
+    migs.last_user_seek,
+
+    -- ===== The columns SQL suggests =====
+    mid.equality_columns,           -- columns used in = predicates
+    mid.inequality_columns,         -- columns used in >, <, BETWEEN, etc.
+    mid.included_columns,           -- columns suggested for INCLUDE (trim these!)
+
+    -- ===== Ready-to-review CREATE INDEX statement =====
+    'CREATE NONCLUSTERED INDEX IX_'
+        + OBJECT_NAME(mid.object_id, mid.database_id) + '_'
+        + REPLACE(REPLACE(REPLACE(
+            ISNULL(mid.equality_columns, '')
+          + ISNULL(mid.inequality_columns, ''), '[', ''), ']', ''), ', ', '_')
+        + ' ON '
+        + OBJECT_SCHEMA_NAME(mid.object_id, mid.database_id) + '.'
+        + OBJECT_NAME(mid.object_id, mid.database_id)
+        + ' ('
+        + ISNULL(mid.equality_columns, '')
+        + CASE WHEN mid.equality_columns IS NOT NULL
+                AND mid.inequality_columns IS NOT NULL
+               THEN ', ' ELSE '' END
+        + ISNULL(mid.inequality_columns, '')
+        + ')'
+        + ISNULL(' INCLUDE (' + mid.included_columns + ')', '')
+        + ';'                          AS create_index_suggestion
+FROM sys.dm_db_missing_index_details AS mid
+JOIN sys.dm_db_missing_index_groups  AS mig
+     ON mid.index_handle = mig.index_handle
+JOIN sys.dm_db_missing_index_group_stats AS migs
+     ON mig.index_group_handle = migs.group_handle
+WHERE mid.database_id = DB_ID()        -- current database only
+ORDER BY impact_score DESC;
+GO
+
+
+/*=================================================================================
+  SECTION B : INSTANCE-WIDE TRIAGE  (find which DB has the worst pain)
+  ---------------------------------------------------------------------------------
+  Use this FIRST to spot the database with the highest cumulative missing-index
+  impact, THEN switch to that DB and use Section A for detailed, actionable output.
+  Aggregated per database so you're not drowning in individual rows.
+=================================================================================*/
+SELECT
+    DB_NAME(mid.database_id)                          AS database_name,
+    COUNT(*)                                          AS missing_index_count,
+    CAST(SUM(migs.avg_total_user_cost
+           * migs.avg_user_impact
+           * (migs.user_seeks + migs.user_scans)) AS DECIMAL(20,2)) AS total_impact_score,
+    SUM(migs.user_seeks + migs.user_scans)           AS total_usage,
+    MAX(migs.avg_user_impact)                         AS max_pct_improvement
+FROM sys.dm_db_missing_index_details AS mid
+JOIN sys.dm_db_missing_index_groups  AS mig
+     ON mid.index_handle = mig.index_handle
+JOIN sys.dm_db_missing_index_group_stats AS migs
+     ON mig.index_group_handle = migs.group_handle
+WHERE mid.database_id > 4              -- skip system DBs
+GROUP BY DB_NAME(mid.database_id)
+ORDER BY total_impact_score DESC;     -- worst-hurting DB on top
+GO
+
+
+/*=================================================================================
+  SECTION C : SAFETY CHECK — existing indexes on a table BEFORE you create one
+  ---------------------------------------------------------------------------------
+  Before creating a suggested index, run this to see what already exists on the
+  table. Avoid creating duplicate/overlapping indexes (storage + write cost).
+=================================================================================*/
+/*  -- uncomment & set the table name:
+USE [YourDatabaseName];
+GO
+SELECT
+    i.name                AS index_name,
+    i.type_desc           AS index_type,
+    STUFF((SELECT ', ' + c.name
+           FROM sys.index_columns ic
+           JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+           WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+             AND ic.is_included_column = 0
+           ORDER BY ic.key_ordinal
+           FOR XML PATH('')), 1, 2, '')   AS key_columns,
+    STUFF((SELECT ', ' + c.name
+           FROM sys.index_columns ic
+           JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+           WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id
+             AND ic.is_included_column = 1
+           FOR XML PATH('')), 1, 2, '')   AS included_columns
+FROM sys.indexes i
+WHERE i.object_id = OBJECT_ID('Schema.YourTableName')   -- 👈 set table
+  AND i.type > 0
+ORDER BY i.index_id;
+*/
+GO
