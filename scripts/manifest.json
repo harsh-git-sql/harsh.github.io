@@ -7,5 +7,6 @@
   { "file": "db_growth_monthly_dynamic.txt", "title": "Check DB Growth trends", "tags": ["Database Growth", "DB Growth","Monitoring"] },
   { "file": "index_fragmentation.txt", "title": "Check index fragmentation", "tags": ["Index fragmentation", "Performance tuning","Monitoring"] },
   { "file": "missing_index.txt", "title": "Check missing indexes", "tags": ["Missing Index", "Performance tuning","Monitoring"] },
-  { "file": "short_term_growth.txt", "title": "Check short term Growth trends", "tags": ["Database short term Growth", "DB short term Growth","Monitoring"] }
+  { "file": "short_term_growth.txt", "title": "Check short term Growth trends", "tags": ["Database short term Growth", "DB short term Growth","Monitoring"] },
+  { "file": "sessions_and_blocking_history.txt", "title": "DB Session count and Blocking history tracker", "tags": ["Monitoring", "Session count","Blocking history"] }
 ]
