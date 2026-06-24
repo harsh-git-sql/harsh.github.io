@@ -3,6 +3,13 @@
   Growth measured by ACTUAL backed-up data size (backupset.backup_size),
   which reflects real data growth even when files are pre-sized.
   All sizes in GB. Set @Days for the look-back window.
+
+  RELIABILITY CHECK COLUMNS:
+   - sample_days        = actual days between first & last backup found
+   - full_backup_count  = how many full backups exist in the window
+       1  -> growth is meaningless (first = last)
+       2  -> only endpoints, treat cautiously
+       many -> trend is trustworthy
 =================================================================*/
 
 DECLARE @Days INT = 30;   --  1, 2, 7, 30, etc.
@@ -23,6 +30,14 @@ DECLARE @Days INT = 30;   --  1, 2, 7, 30, etc.
     WHERE bs.type = 'D'
       AND bs.backup_finish_date >= DATEADD(DAY, -@Days, GETDATE())
 ),
+BackupCount AS
+(
+    -- how many full backups exist per DB in the window
+    SELECT database_name,
+           COUNT(*) AS full_backup_count
+    FROM FullBackups
+    GROUP BY database_name
+),
 FirstBackup AS
 (
     SELECT database_name,
@@ -42,6 +57,7 @@ SELECT
     d.name                                          AS database_name,
     d.recovery_model_desc                           AS recovery_model,
     @Days                                           AS lookback_days,
+    bc.full_backup_count,                                    -- 👈 reliability indicator
     DATEDIFF(DAY, f.first_backup_date, l.last_backup_date) AS sample_days,
     f.first_backup_date,
     l.last_backup_date,
@@ -64,10 +80,19 @@ SELECT
     CAST(
         (l.last_backup_bytes - f.first_backup_bytes) / 1073741824.0
         / NULLIF(DATEDIFF(DAY, f.first_backup_date, l.last_backup_date), 0)
-    AS DECIMAL(20,4)) AS avg_growth_gb_per_day
+    AS DECIMAL(20,4)) AS avg_growth_gb_per_day,
+
+    -- ===== Quick reliability flag =====
+    CASE
+        WHEN bc.full_backup_count = 1 THEN 'NOT RELIABLE (only 1 backup)'
+        WHEN bc.full_backup_count = 2 THEN 'LOW (endpoints only)'
+        WHEN bc.full_backup_count BETWEEN 3 AND 5 THEN 'MODERATE'
+        ELSE 'GOOD'
+    END AS reliability
 FROM sys.databases AS d
-JOIN FirstBackup f ON d.name = f.database_name
-JOIN LastBackup  l ON d.name = l.database_name
+JOIN BackupCount  bc ON d.name = bc.database_name
+JOIN FirstBackup  f  ON d.name = f.database_name
+JOIN LastBackup   l  ON d.name = l.database_name
 WHERE d.database_id > 4
   AND d.state_desc = 'ONLINE'
 ORDER BY growth_gb DESC;
