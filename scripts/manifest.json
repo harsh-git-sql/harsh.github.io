@@ -2,6 +2,7 @@
   { "file": "sample-backup-check.txt", "title": "Check Last Backup Time (All DBs)", "tags": ["backup", "monitoring"] },
   { "file": "sample-blocking-sessions.txt", "title": "Find Blocking Sessions", "tags": ["troubleshooting", "performance"] },
   { "file": "Backup_Completion_Time.txt", "title": "Estimated backup completion time", "tags": ["Backup", "time"] },
+  { "file": "last_login_tracker.txt", "title": "last login time tracker", "tags": ["Last login time", "Monitoring"] },
   { "file": "db_growth_monthly_dynamic.txt", "title": "Check DB Growth trends", "tags": ["Database Growth", "DB Growth","Monitoring"] },
   { "file": "short_term_growth.txt", "title": "Check short term Growth trends", "tags": ["Database short term Growth", "DB short term Growth","Monitoring"] }
 ]
