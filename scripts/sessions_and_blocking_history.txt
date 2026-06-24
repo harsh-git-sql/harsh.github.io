@@ -1,1 +1,319 @@
-a
+/*=================================================================================
+  SCRIPT A : RECORDERS ONLY  (Session Count + Blocking History)
+  =================================================================================
+  WHAT THIS DOES:
+     - Creates the local admin database.
+     - Table A (SessionHistory)  : session count per minute (per DB/login/host).
+     - Table B (BlockingHistory) : lead blocker + blocked sessions + queries + time.
+     - Stored procs to populate both tables.
+     - Stored proc to purge old data.
+     - SQL Agent jobs to run them on schedule.
+
+  ⚠ ZERO MAIL. This script ONLY writes to tables. It is the "black box recorder"
+    so you can look BACK after an incident.
+
+  PHASES:
+     1 : Create admin database
+     2 : Create Table A (SessionHistory)
+     3 : Create Table B (BlockingHistory)
+     4 : Proc - collect session counts
+     5 : Proc - collect blocking snapshot
+     6 : Proc - purge old data (retention)
+     7 : SQL Agent jobs
+     8 : Retrieval queries (look back after an incident)
+
+  REPLACE: <local_admin_db>  -> your admin DB name (e.g., DBA)
+=================================================================================*/
+
+
+/*=================================================================================
+  PHASE 1 : CREATE THE LOCAL ADMIN DATABASE (if not exists)
+=================================================================================*/
+IF DB_ID('<local_admin_db>') IS NULL
+BEGIN
+    CREATE DATABASE [<local_admin_db>];
+    PRINT 'Database <local_admin_db> created.';
+END
+ELSE
+    PRINT 'Database <local_admin_db> already exists - skipping.';
+GO
+
+
+/*=================================================================================
+  PHASE 2 : TABLE A — SessionHistory  (session count per minute)
+  ---------------------------------------------------------------------------------
+  One row per DB/login/host/program combo, per capture. Lets you spot connection
+  spikes after the fact ("connections doubled on DB X at 19:20, from login Y").
+=================================================================================*/
+USE [<local_admin_db>];
+GO
+
+IF OBJECT_ID('dbo.SessionHistory', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.SessionHistory
+    (
+        SessionHistoryID BIGINT IDENTITY(1,1) PRIMARY KEY,
+        CaptureTime      DATETIME      NOT NULL DEFAULT GETDATE(),
+        DatabaseName     SYSNAME       NULL,
+        LoginName        SYSNAME       NULL,
+        HostName         SYSNAME       NULL,
+        ProgramName      NVARCHAR(256) NULL,
+        SessionCount     INT           NOT NULL
+    );
+
+    CREATE INDEX IX_SessionHistory_CaptureTime
+        ON dbo.SessionHistory (CaptureTime)
+        INCLUDE (DatabaseName, LoginName, SessionCount);
+
+    PRINT 'Table dbo.SessionHistory created.';
+END
+ELSE
+    PRINT 'Table dbo.SessionHistory already exists - skipping.';
+GO
+
+
+/*=================================================================================
+  PHASE 3 : TABLE B — BlockingHistory  (lead blocker + victims + queries)
+  ---------------------------------------------------------------------------------
+  One row per BLOCKED session at capture time, but each row also carries its
+  LEAD-blocker details, so you can reconstruct the whole picture:
+     - which lead blocker, its SPID, its query
+     - how many it was blocking (blocking_count)
+     - which session it blocked (blocked SPID) and that victim's query
+  Query text is NVARCHAR(MAX) so nothing is truncated.
+=================================================================================*/
+IF OBJECT_ID('dbo.BlockingHistory', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.BlockingHistory
+    (
+        BlockingHistoryID   BIGINT IDENTITY(1,1) PRIMARY KEY,
+        CaptureTime         DATETIME       NOT NULL DEFAULT GETDATE(),
+
+        -- ===== LEAD (head) blocker details =====
+        LeadBlockerSPID     INT            NOT NULL,
+        LeadBlockerLogin    SYSNAME        NULL,
+        LeadBlockerHost     SYSNAME        NULL,
+        LeadBlockerIP       VARCHAR(48)    NULL,
+        BlockingCount       INT            NULL,      -- how many it is blocking
+        LeadBlockerSQL      NVARCHAR(MAX)  NULL,      -- the root-cause query
+
+        -- ===== BLOCKED (victim) details =====
+        BlockedSPID         INT            NOT NULL,
+        BlockedLogin        SYSNAME        NULL,
+        BlockedHost         SYSNAME        NULL,
+        DatabaseName        SYSNAME        NULL,
+        WaitType            NVARCHAR(60)   NULL,
+        WaitTimeSec         INT            NULL,
+        WaitResource        NVARCHAR(256)  NULL,
+        BlockedSQL          NVARCHAR(MAX)  NULL       -- the victim's query
+    );
+
+    CREATE INDEX IX_BlockingHistory_CaptureTime
+        ON dbo.BlockingHistory (CaptureTime)
+        INCLUDE (LeadBlockerSPID, BlockedSPID, BlockingCount);
+
+    PRINT 'Table dbo.BlockingHistory created.';
+END
+ELSE
+    PRINT 'Table dbo.BlockingHistory already exists - skipping.';
+GO
+
+
+/*=================================================================================
+  PHASE 4 : PROC — Collect Session Counts  (writes to Table A)
+  ---------------------------------------------------------------------------------
+  READ-ONLY against the server; writes only to SessionHistory.
+=================================================================================*/
+CREATE OR ALTER PROCEDURE dbo.usp_Collect_SessionCount
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.SessionHistory
+        (DatabaseName, LoginName, HostName, ProgramName, SessionCount)
+    SELECT
+        DB_NAME(s.database_id),
+        s.login_name,
+        s.host_name,
+        s.program_name,
+        COUNT(*)
+    FROM sys.dm_exec_sessions AS s
+    WHERE s.is_user_process = 1
+    GROUP BY
+        DB_NAME(s.database_id),
+        s.login_name,
+        s.host_name,
+        s.program_name;
+END
+GO
+
+
+/*=================================================================================
+  PHASE 5 : PROC — Collect Blocking Snapshot  (writes to Table B)
+  ---------------------------------------------------------------------------------
+  Captures any CURRENT blocking. For every blocked session it records that
+  session's details PLUS its lead-blocker's details and query.
+  If there is no blocking right now, it writes nothing.
+  READ-ONLY against the server; writes only to BlockingHistory.
+=================================================================================*/
+CREATE OR ALTER PROCEDURE dbo.usp_Collect_Blocking
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.BlockingHistory
+        (LeadBlockerSPID, LeadBlockerLogin, LeadBlockerHost, LeadBlockerIP,
+         BlockingCount, LeadBlockerSQL,
+         BlockedSPID, BlockedLogin, BlockedHost, DatabaseName,
+         WaitType, WaitTimeSec, WaitResource, BlockedSQL)
+    SELECT
+        -- lead blocker (the session doing the blocking)
+        r.blocking_session_id,
+        bs.login_name,
+        bs.host_name,
+        bc.client_net_address,
+        (SELECT COUNT(*) FROM sys.dm_exec_requests r2
+         WHERE r2.blocking_session_id = r.blocking_session_id),
+        bst.text,                                   -- blocker's last query
+
+        -- blocked victim
+        r.session_id,
+        s.login_name,
+        s.host_name,
+        DB_NAME(r.database_id),
+        r.wait_type,
+        r.wait_time / 1000,                         -- ms -> seconds
+        r.wait_resource,
+        SUBSTRING(st.text,                          -- victim's running statement
+                  (r.statement_start_offset/2)+1,
+                  ((CASE r.statement_end_offset
+                        WHEN -1 THEN DATALENGTH(st.text)
+                        ELSE r.statement_end_offset END
+                    - r.statement_start_offset)/2)+1)
+    FROM sys.dm_exec_requests AS r
+    JOIN sys.dm_exec_sessions AS s  ON r.session_id = s.session_id          -- victim
+    LEFT JOIN sys.dm_exec_sessions AS bs ON r.blocking_session_id = bs.session_id  -- blocker
+    LEFT JOIN sys.dm_exec_connections AS bc ON r.blocking_session_id = bc.session_id
+    OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st                    -- victim text
+    OUTER APPLY sys.dm_exec_sql_text(bc.most_recent_sql_handle) AS bst      -- blocker text
+    WHERE r.blocking_session_id <> 0;               -- only blocked sessions
+END
+GO
+
+
+/*=================================================================================
+  PHASE 6 : PROC — Purge Old Data  (retention for BOTH tables)
+  ---------------------------------------------------------------------------------
+  Default 30 days. Keeps both recorder tables from ballooning.
+=================================================================================*/
+CREATE OR ALTER PROCEDURE dbo.usp_Purge_History
+    @RetentionDays INT = 30
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DELETE FROM dbo.SessionHistory
+    WHERE CaptureTime < DATEADD(DAY, -@RetentionDays, GETDATE());
+    PRINT CAST(@@ROWCOUNT AS VARCHAR(20)) + ' rows purged from SessionHistory.';
+
+    DELETE FROM dbo.BlockingHistory
+    WHERE CaptureTime < DATEADD(DAY, -@RetentionDays, GETDATE());
+    PRINT CAST(@@ROWCOUNT AS VARCHAR(20)) + ' rows purged from BlockingHistory.';
+END
+GO
+
+
+/*=================================================================================
+  PHASE 7 : SQL AGENT JOBS  (created via T-SQL - portable)
+  ---------------------------------------------------------------------------------
+     JOB 1 : DBA_Session_Recorder   -> usp_Collect_SessionCount  every 1 min
+     JOB 2 : DBA_Blocking_Recorder  -> usp_Collect_Blocking      every 1 min
+     JOB 3 : DBA_Purge_History      -> usp_Purge_History         nightly 01:00
+=================================================================================*/
+USE msdb;
+GO
+
+/* ---- JOB 1 : SESSION RECORDER ---- */
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = 'DBA_Session_Recorder')
+    EXEC msdb.dbo.sp_delete_job @job_name = 'DBA_Session_Recorder';
+GO
+EXEC msdb.dbo.sp_add_job @job_name = 'DBA_Session_Recorder',
+     @description = 'Records session counts every minute.';
+EXEC msdb.dbo.sp_add_jobstep @job_name = 'DBA_Session_Recorder',
+     @step_name = 'Collect sessions', @subsystem = 'TSQL',
+     @database_name = '<local_admin_db>',
+     @command = 'EXEC dbo.usp_Collect_SessionCount;';
+EXEC msdb.dbo.sp_add_schedule @schedule_name = 'Every_1_Min_Sessions',
+     @freq_type = 4, @freq_interval = 1,
+     @freq_subday_type = 4, @freq_subday_interval = 1, @active_start_time = 000000;
+EXEC msdb.dbo.sp_attach_schedule @job_name = 'DBA_Session_Recorder',
+     @schedule_name = 'Every_1_Min_Sessions';
+EXEC msdb.dbo.sp_add_jobserver @job_name = 'DBA_Session_Recorder';
+GO
+
+/* ---- JOB 2 : BLOCKING RECORDER ---- */
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = 'DBA_Blocking_Recorder')
+    EXEC msdb.dbo.sp_delete_job @job_name = 'DBA_Blocking_Recorder';
+GO
+EXEC msdb.dbo.sp_add_job @job_name = 'DBA_Blocking_Recorder',
+     @description = 'Records blocking snapshots every minute.';
+EXEC msdb.dbo.sp_add_jobstep @job_name = 'DBA_Blocking_Recorder',
+     @step_name = 'Collect blocking', @subsystem = 'TSQL',
+     @database_name = '<local_admin_db>',
+     @command = 'EXEC dbo.usp_Collect_Blocking;';
+EXEC msdb.dbo.sp_add_schedule @schedule_name = 'Every_1_Min_Blocking',
+     @freq_type = 4, @freq_interval = 1,
+     @freq_subday_type = 4, @freq_subday_interval = 1, @active_start_time = 000000;
+EXEC msdb.dbo.sp_attach_schedule @job_name = 'DBA_Blocking_Recorder',
+     @schedule_name = 'Every_1_Min_Blocking';
+EXEC msdb.dbo.sp_add_jobserver @job_name = 'DBA_Blocking_Recorder';
+GO
+
+/* ---- JOB 3 : NIGHTLY PURGE ---- */
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = 'DBA_Purge_History')
+    EXEC msdb.dbo.sp_delete_job @job_name = 'DBA_Purge_History';
+GO
+EXEC msdb.dbo.sp_add_job @job_name = 'DBA_Purge_History',
+     @description = 'Purges recorder tables older than retention.';
+EXEC msdb.dbo.sp_add_jobstep @job_name = 'DBA_Purge_History',
+     @step_name = 'Purge old rows', @subsystem = 'TSQL',
+     @database_name = '<local_admin_db>',
+     @command = 'EXEC dbo.usp_Purge_History @RetentionDays = 30;';
+EXEC msdb.dbo.sp_add_schedule @schedule_name = 'Daily_0100_Purge',
+     @freq_type = 4, @freq_interval = 1, @active_start_time = 010000;
+EXEC msdb.dbo.sp_attach_schedule @job_name = 'DBA_Purge_History',
+     @schedule_name = 'Daily_0100_Purge';
+EXEC msdb.dbo.sp_add_jobserver @job_name = 'DBA_Purge_History';
+GO
+
+
+/*=================================================================================
+  PHASE 8 : RETRIEVAL QUERIES  (look back after an incident — simple SELECTs)
+=================================================================================*/
+
+/* -- Session counts, last 2 hours, per DB (spot spikes)
+SELECT CaptureTime, DatabaseName, SUM(SessionCount) AS total_sessions
+FROM <local_admin_db>.dbo.SessionHistory
+WHERE CaptureTime >= DATEADD(HOUR, -2, GETDATE())
+GROUP BY CaptureTime, DatabaseName
+ORDER BY CaptureTime DESC, total_sessions DESC;
+*/
+
+/* -- Blocking history, last 2 hours (lead blocker + victims)
+SELECT * FROM <local_admin_db>.dbo.BlockingHistory
+WHERE CaptureTime >= DATEADD(HOUR, -2, GETDATE())
+ORDER BY CaptureTime DESC, BlockingCount DESC;
+*/
+
+/* -- Worst lead blockers in last 24h (who blocked the most)
+SELECT LeadBlockerSPID, LeadBlockerLogin, MAX(BlockingCount) AS max_blocked,
+       MIN(CaptureTime) AS first_seen, MAX(CaptureTime) AS last_seen
+FROM <local_admin_db>.dbo.BlockingHistory
+WHERE CaptureTime >= DATEADD(DAY, -1, GETDATE())
+GROUP BY LeadBlockerSPID, LeadBlockerLogin
+ORDER BY max_blocked DESC;
+*/
+GO
+
+PRINT '=== SCRIPT A done: recorders only (Session + Blocking). No mail. ===';
+GO
