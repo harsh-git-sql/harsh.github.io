@@ -1,21 +1,20 @@
-Select src_code , 
-CC_Root_RRN,
-CC_Auth_Code,
-t.BANK_ID,
-BANK_NAME,ret_bid,initial_amt,src_code,des_itc ,
-TRAN_ID ,
-src_prn ,
-src_amt ,
-t.R_MOD_TIME,
-SUBMER_TARIFF_AMT,
-AMT_GIVE_TO_SUBMER,
-t.R_CRE_TIME, 
-PAYMENT_DATE ,
-SRC_ITC, 
-ret_tran_desc ,ARN_Number,RECON_DATE,
-RET_TRAN_STATUS
-from pg_t_details_tbl t (nolock) join pg_m_banks b (nolock)
---from [archive_PGSQLDB].dbo.pg_t_details t (nolock) join pg_m_banks b (nolock)
-on t.bank_id = b.bank_id
-and src_code in ('L958472') and t.r_cre_time >= '26 Jun 2025' and t.r_cre_time <='31 Mar 2026'
---and RET_TRAN_STATUS in ( 'S' , 'T')
+SELECT
+    d.name AS database_name,
+    d.recovery_model_desc AS recovery_model,
+
+    -- ===== FULL backup (type = 'D') =====
+    MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END) AS last_full_backup,
+    DATEDIFF(HOUR, MAX(CASE WHEN b.type = 'D' THEN b.backup_finish_date END), GETDATE()) AS hours_since_full,
+
+    -- ===== DIFFERENTIAL backup (type = 'I') =====
+    MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END) AS last_diff_backup,
+    DATEDIFF(HOUR, MAX(CASE WHEN b.type = 'I' THEN b.backup_finish_date END), GETDATE()) AS hours_since_diff,
+
+    -- ===== LOG backup (type = 'L') =====
+    MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END) AS last_log_backup,
+    DATEDIFF(MINUTE, MAX(CASE WHEN b.type = 'L' THEN b.backup_finish_date END), GETDATE()) AS minutes_since_log
+FROM sys.databases d
+LEFT JOIN msdb.dbo.backupset b
+    ON d.name = b.database_name
+GROUP BY d.name, d.recovery_model_desc
+ORDER BY d.name;
