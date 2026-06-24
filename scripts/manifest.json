@@ -9,5 +9,5 @@
   { "file": "missing_index.txt", "title": "Check missing indexes", "tags": ["Missing Index", "Performance tuning","Monitoring"] },
   { "file": "short_term_growth.txt", "title": "Check short term Growth trends", "tags": ["Database short term Growth", "DB short term Growth","Monitoring"] },
   { "file": "sessions_and_blocking_history.txt", "title": "DB Session count and Blocking history tracker", "tags": ["Monitoring", "Session count","Blocking history"] },
-  { "file": "blocking_alert_mail_setup.txt", "title": "Blocking alert mail setup", "tags": ["Monitoring", "Blocking alert","Blocking history","Database mail"]
+  { "file": "blocking_alert_mail_setup.txt", "title": "Blocking alert mail setup", "tags": ["Monitoring", "Blocking alert","Blocking history","Database mail"] }
 ]
