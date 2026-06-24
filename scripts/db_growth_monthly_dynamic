@@ -1,1 +1,73 @@
-abcd
+/*=================================================================
+  Database Growth Report (READ-ONLY)
+  Growth measured by ACTUAL backed-up data size (backupset.backup_size),
+  which reflects real data growth even when files are pre-sized.
+  All sizes in GB. Set @Days for the look-back window.
+=================================================================*/
+
+DECLARE @Days INT = 30;   --  1, 2, 7, 30, etc.
+
+;WITH FullBackups AS
+(
+    SELECT
+        bs.database_name,
+        bs.backup_set_id,
+        bs.backup_finish_date,
+        bs.backup_size,
+        bs.compressed_backup_size,
+        ROW_NUMBER() OVER (PARTITION BY bs.database_name
+                           ORDER BY bs.backup_finish_date ASC)  AS rn_first,
+        ROW_NUMBER() OVER (PARTITION BY bs.database_name
+                           ORDER BY bs.backup_finish_date DESC) AS rn_last
+    FROM msdb.dbo.backupset AS bs
+    WHERE bs.type = 'D'
+      AND bs.backup_finish_date >= DATEADD(DAY, -@Days, GETDATE())
+),
+FirstBackup AS
+(
+    SELECT database_name,
+           backup_finish_date AS first_backup_date,
+           backup_size        AS first_backup_bytes
+    FROM FullBackups WHERE rn_first = 1
+),
+LastBackup AS
+(
+    SELECT database_name,
+           backup_finish_date     AS last_backup_date,
+           backup_size            AS last_backup_bytes,
+           compressed_backup_size AS last_compressed_bytes
+    FROM FullBackups WHERE rn_last = 1
+)
+SELECT
+    d.name                                          AS database_name,
+    d.recovery_model_desc                           AS recovery_model,
+    @Days                                           AS lookback_days,
+    DATEDIFF(DAY, f.first_backup_date, l.last_backup_date) AS sample_days,
+    f.first_backup_date,
+    l.last_backup_date,
+
+    -- ===== Sizes in GB =====
+    CAST(f.first_backup_bytes    / 1073741824.0 AS DECIMAL(20,3)) AS first_backup_gb,
+    CAST(l.last_backup_bytes     / 1073741824.0 AS DECIMAL(20,3)) AS last_backup_gb,
+    CAST(l.last_compressed_bytes / 1073741824.0 AS DECIMAL(20,3)) AS last_compressed_gb,
+
+    -- ===== Actual data growth over the window =====
+    CAST((l.last_backup_bytes - f.first_backup_bytes) / 1073741824.0 AS DECIMAL(20,3)) AS growth_gb,
+
+    -- ===== Growth percentage (based on original size) =====
+    CAST(
+        ((l.last_backup_bytes - f.first_backup_bytes) * 100.0)
+        / NULLIF(f.first_backup_bytes, 0)
+    AS DECIMAL(20,2)) AS growth_percent,
+
+    -- ===== Average growth per day (forecasting) =====
+    CAST(
+        (l.last_backup_bytes - f.first_backup_bytes) / 1073741824.0
+        / NULLIF(DATEDIFF(DAY, f.first_backup_date, l.last_backup_date), 0)
+    AS DECIMAL(20,4)) AS avg_growth_gb_per_day
+FROM sys.databases AS d
+JOIN FirstBackup f ON d.name = f.database_name
+JOIN LastBackup  l ON d.name = l.database_name
+WHERE d.database_id > 4
+  AND d.state_desc = 'ONLINE'
+ORDER BY growth_gb DESC;
