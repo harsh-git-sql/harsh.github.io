@@ -1,4 +1,5 @@
 [
   { "file": "sample-backup-check.txt", "title": "Check Last Backup Time (All DBs)", "tags": ["backup", "monitoring"] },
   { "file": "sample-blocking-sessions.txt", "title": "Find Blocking Sessions", "tags": ["troubleshooting", "performance"] }
+  { "file": "Backup_Completion_Time.txt", "title": "Estimated backup completion time", "tags": ["Backup", "time"] }
 ]
