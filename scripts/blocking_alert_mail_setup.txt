@@ -1,1 +1,217 @@
-a
+/*=================================================================================
+  SCRIPT B : DATABASE MAIL + BLOCKING ALERT  (Standalone, self-contained)
+  =================================================================================
+  WHAT THIS DOES:
+     - Sets up Database Mail from scratch (the email engine).
+     - Creates a stored proc that checks for blocking RIGHT NOW (live, from DMVs)
+       and, if found, emails a clean HTML report (lead blocker + victims + queries).
+     - Creates a SQL Agent job to run that check every minute.
+
+  KEY DESIGN:
+     - The alert reads LIVE data directly from DMVs when it fires.
+     - It does NOT depend on Script A or any table. Fully independent & portable.
+       (Script A = look BACK later;  Script B = alert in REAL TIME. Separate jobs.)
+
+  PHASES:
+     1 : Database Mail setup from scratch (step-by-step)
+     2 : Test email
+     3 : Blocking alert stored proc (live DMV -> HTML mail)
+     4 : SQL Agent job to run the alert every minute
+
+  REPLACE:
+     <smtp_server>         -> SMTP server (e.g., smtp.company.com)
+     <smtp_port>           -> usually 25 or 587
+     <from_address>        -> e.g., sqlalerts@company.com
+     dba-team@company.com  -> your real recipient(s)
+=================================================================================*/
+
+
+/*=================================================================================
+  PHASE 1 : DATABASE MAIL SETUP FROM SCRATCH
+  ---------------------------------------------------------------------------------
+  MENTAL MODEL:
+     ACCOUNT = "how to send" (SMTP server/port/from-address/credentials)
+     PROFILE = named container grouping account(s); you send by PROFILE name.
+=================================================================================*/
+
+/* ---- 1.1 : Enable the Database Mail feature ---- */
+EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE;
+EXEC sp_configure 'Database Mail XPs', 1;
+RECONFIGURE;
+GO
+
+/* ---- 1.2 : Create the mail ACCOUNT (SMTP details) ----
+   For anonymous/internal relay: leave username/password commented.
+   For authenticated SMTP: uncomment them.
+*/
+EXECUTE msdb.dbo.sysmail_add_account_sp
+     @account_name    = 'DBA_Mail_Account',
+     @description     = 'Account for DBA monitoring alerts',
+     @email_address   = '<from_address>',
+     @display_name    = 'SQL Server DBA Alerts',
+     @mailserver_name = '<smtp_server>',
+     @port            = <smtp_port>;
+     -- ,@username     = 'smtp_user'
+     -- ,@password     = 'smtp_password'
+GO
+
+/* ---- 1.3 : Create the mail PROFILE ---- */
+EXECUTE msdb.dbo.sysmail_add_profile_sp
+     @profile_name = 'DBA_Mail_Profile',
+     @description  = 'Profile for DBA monitoring alerts';
+GO
+
+/* ---- 1.4 : Link ACCOUNT to PROFILE ---- */
+EXECUTE msdb.dbo.sysmail_add_profileaccount_sp
+     @profile_name    = 'DBA_Mail_Profile',
+     @account_name    = 'DBA_Mail_Account',
+     @sequence_number = 1;
+GO
+
+/* ---- 1.5 : Grant the PROFILE to all users + make default ---- */
+EXECUTE msdb.dbo.sysmail_add_principalprofile_sp
+     @profile_name   = 'DBA_Mail_Profile',
+     @principal_name = 'public',
+     @is_default     = 1;
+GO
+
+
+/*=================================================================================
+  PHASE 2 : SEND A TEST EMAIL  (confirm mail works before relying on it)
+  ---------------------------------------------------------------------------------
+  If it doesn't arrive, troubleshoot with:
+     SELECT TOP 20 * FROM msdb.dbo.sysmail_allthis  ORDER BY send_request_date DESC;
+     SELECT TOP 20 * FROM msdb.dbo.sysmail_event_log ORDER BY log_date DESC;
+  COMMON CAUSES: wrong SMTP server/port; SMTP needs auth; relay not allowing this
+     server's IP; firewall blocking the port. (Mail/network team has the answers.)
+=================================================================================*/
+EXEC msdb.dbo.sp_send_dbmail
+     @profile_name = 'DBA_Mail_Profile',
+     @recipients   = 'dba-team@company.com',
+     @subject      = 'Database Mail Test - SUCCESS',
+     @body         = 'If you can read this, Database Mail works.';
+GO
+
+
+/*=================================================================================
+  PHASE 3 : BLOCKING ALERT STORED PROC  (live DMV -> HTML email)
+  ---------------------------------------------------------------------------------
+  - Checks for blocking happening RIGHT NOW (reads DMVs live).
+  - If none, exits silently (no mail).
+  - If blocking exists, builds an HTML table and emails it.
+  - Dynamic subject shows server + lead blocker + count for instant triage.
+  - Self-contained: no dependency on any table.
+  NOTE: This proc lives in msdb so it's available regardless of other DBs.
+=================================================================================*/
+USE msdb;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.usp_Alert_Blocking
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- exit silently if there is no blocking right now
+    IF NOT EXISTS (SELECT 1 FROM sys.dm_exec_requests WHERE blocking_session_id <> 0)
+        RETURN;
+
+    -- find the worst lead blocker for a meaningful subject line
+    DECLARE @leadSPID INT, @leadCount INT;
+    SELECT TOP 1
+        @leadSPID  = r.blocking_session_id,
+        @leadCount = (SELECT COUNT(*) FROM sys.dm_exec_requests r2
+                      WHERE r2.blocking_session_id = r.blocking_session_id)
+    FROM sys.dm_exec_requests r
+    WHERE r.blocking_session_id <> 0
+      AND r.blocking_session_id NOT IN              -- only HEAD blockers
+          (SELECT session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0)
+    ORDER BY @leadCount DESC;
+
+    DECLARE @subject NVARCHAR(200) =
+        'BLOCKING ALERT [' + @@SERVERNAME + '] - Lead SPID '
+        + CAST(ISNULL(@leadSPID,0) AS VARCHAR(10))
+        + ' blocking ' + CAST(ISNULL(@leadCount,0) AS VARCHAR(10))
+        + ' - ' + CONVERT(VARCHAR(20), GETDATE(), 120);
+
+    -- build the HTML body (FOR XML handles encoding of special chars in SQL text)
+    DECLARE @html NVARCHAR(MAX);
+
+    SET @html =
+        N'<html><body style="font-family:Segoe UI,Arial;">'
+      + N'<h3>Blocking detected on ' + @@SERVERNAME
+      + N' at ' + CONVERT(VARCHAR(20), GETDATE(), 120) + N'</h3>'
+      + N'<table border="1" cellpadding="5" cellspacing="0" '
+      + N'style="border-collapse:collapse;font-size:12px;">'
+      + N'<tr style="background:#d9534f;color:#fff;">'
+      + N'<th>Role</th><th>Blocker SPID</th><th>Blocking Count</th>'
+      + N'<th>Blocked SPID</th><th>DB</th><th>Wait</th><th>Wait(s)</th>'
+      + N'<th>Blocked Login</th><th>Blocked Host</th>'
+      + N'<th>Blocker Query</th><th>Blocked Query</th></tr>'
+      + CAST((
+            SELECT
+                td = CASE WHEN r.blocking_session_id NOT IN
+                          (SELECT session_id FROM sys.dm_exec_requests WHERE blocking_session_id <> 0)
+                     THEN 'LEAD BLOCKER' ELSE 'blocked' END, '',
+                td = r.blocking_session_id, '',
+                td = (SELECT COUNT(*) FROM sys.dm_exec_requests r2
+                      WHERE r2.blocking_session_id = r.blocking_session_id), '',
+                td = r.session_id, '',
+                td = DB_NAME(r.database_id), '',
+                td = r.wait_type, '',
+                td = r.wait_time/1000, '',
+                td = s.login_name, '',
+                td = s.host_name, '',
+                -- blocker's last query (truncated for mail readability)
+                td = LEFT(ISNULL(bst.text,''), 500), '',
+                -- victim's running query (truncated)
+                td = LEFT(ISNULL(st.text,''), 500), ''
+            FROM sys.dm_exec_requests r
+            JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+            LEFT JOIN sys.dm_exec_connections bc ON r.blocking_session_id = bc.session_id
+            OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
+            OUTER APPLY sys.dm_exec_sql_text(bc.most_recent_sql_handle) bst
+            WHERE r.blocking_session_id <> 0
+            ORDER BY (SELECT COUNT(*) FROM sys.dm_exec_requests r2
+                      WHERE r2.blocking_session_id = r.blocking_session_id) DESC
+            FOR XML PATH('tr'), TYPE
+        ) AS NVARCHAR(MAX))
+      + N'</table></body></html>';
+
+    -- send it
+    EXEC msdb.dbo.sp_send_dbmail
+         @profile_name = 'DBA_Mail_Profile',
+         @recipients   = 'dba-team@company.com',
+         @subject      = @subject,
+         @body         = @html,
+         @body_format  = 'HTML';
+END
+GO
+
+
+/*=================================================================================
+  PHASE 4 : SQL AGENT JOB  -> run the blocking alert every minute
+  ---------------------------------------------------------------------------------
+  The proc exits silently when there's no blocking, so running every minute is
+  cheap. (For tighter granularity you could add a WAITFOR DELAY loop inside the
+  proc later, but 1-minute is the simple, robust default.)
+=================================================================================*/
+IF EXISTS (SELECT 1 FROM msdb.dbo.sysjobs WHERE name = 'DBA_Blocking_Alert')
+    EXEC msdb.dbo.sp_delete_job @job_name = 'DBA_Blocking_Alert';
+GO
+EXEC msdb.dbo.sp_add_job @job_name = 'DBA_Blocking_Alert',
+     @description = 'Checks for blocking every minute and emails if found.';
+EXEC msdb.dbo.sp_add_jobstep @job_name = 'DBA_Blocking_Alert',
+     @step_name = 'Check and alert blocking', @subsystem = 'TSQL',
+     @database_name = 'msdb',
+     @command = 'EXEC dbo.usp_Alert_Blocking;';
+EXEC msdb.dbo.sp_add_schedule @schedule_name = 'Every_1_Min_BlockAlert',
+     @freq_type = 4, @freq_interval = 1,
+     @freq_subday_type = 4, @freq_subday_interval = 1, @active_start_time = 000000;
+EXEC msdb.dbo.sp_attach_schedule @job_name = 'DBA_Blocking_Alert',
+     @schedule_name = 'Every_1_Min_BlockAlert';
+EXEC msdb.dbo.sp_add_jobserver @job_name = 'DBA_Blocking_Alert';
+GO
+
+PRINT '=== SCRIPT B done: Database Mail + Blocking Alert (live, self-contained). ===';
+GO
