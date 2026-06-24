@@ -1,1 +1,190 @@
-a
+/*=================================================================================
+  LOGIN / USER LAST-LOGIN TRACKER
+  ---------------------------------------------------------------------------------
+  PURPOSE : SQL Server has NO built-in "last login time". This toolkit captures
+            and reports when each login last connected — solving the classic
+            "when did user X last log in / is this login still used?" problem.
+
+  METHOD  : A lightweight LOGON TRIGGER writes one row per connection into a
+            logging table in your DBA admin database. Reports then read from it.
+
+  SAFETY  : The trigger writes ONLY to your DBA admin table. It uses TRY/CATCH so
+            a logging failure can NEVER block a login or lock you out.
+            All report sections are READ-ONLY.
+
+  ⚠ IMPORTANT:
+     - Captures logins ONLY from the moment the trigger is created (no history
+       before that). Deploy it now so history starts building.
+     - Create the DBA database + table BEFORE the trigger, or logins may fail.
+     - NEVER remove the TRY/CATCH from the trigger.
+     - Emergency off-switch (via DAC) is documented at the bottom.
+
+  HOW TO USE:
+     STEP 1 -> Run ONCE to create the logging table.
+     STEP 2 -> Run ONCE to create the logon trigger (starts capturing).
+     STEP 3 -> Report: last login time per login.
+     STEP 4 -> Report: logins that NEVER connected (cleanup / security).
+     STEP 5 -> Quick live check: who is connected RIGHT NOW (no history needed).
+     STEP 6 -> Maintenance + EMERGENCY DISABLE instructions.
+=================================================================================*/
+
+
+/*=================================================================================
+  STEP 1 : CREATE THE LOGGING TABLE  (run ONCE)
+  ---------------------------------------------------------------------------------
+  Lives in your DBA admin database. Change "DBA" to your admin DB name if needed.
+  One row is inserted per connection by the trigger in Step 2.
+=================================================================================*/
+USE DBA;   -- 👈 your admin database (NOT a production data DB)
+GO
+
+IF OBJECT_ID('dbo.LoginAudit', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.LoginAudit
+    (
+        LoginAuditID  BIGINT IDENTITY(1,1) PRIMARY KEY,
+        LoginTime     DATETIME      NOT NULL DEFAULT GETDATE(),
+        LoginName     SYSNAME       NOT NULL,   -- the login that connected
+        HostName      SYSNAME       NULL,       -- client machine name
+        ProgramName   NVARCHAR(256) NULL,       -- app used to connect
+        ClientIP      VARCHAR(48)   NULL,       -- source IP address
+        DatabaseName  SYSNAME       NULL        -- default DB context at logon
+    );
+
+    -- index for fast "last login per login_name" lookups
+    CREATE INDEX IX_LoginAudit_Name_Time
+        ON dbo.LoginAudit (LoginName, LoginTime DESC);
+
+    PRINT 'Table dbo.LoginAudit created.';
+END
+ELSE
+    PRINT 'Table dbo.LoginAudit already exists - skipping creation.';
+GO
+
+
+/*=================================================================================
+  STEP 2 : CREATE THE LOGON TRIGGER  (run ONCE)
+  ---------------------------------------------------------------------------------
+  Fires on EVERY connection to the instance and logs one row.
+  - Kept minimal so it never slows down connections.
+  - TRY/CATCH ensures a logging error never blocks a login (critical!).
+  ⚠ Make sure Step 1 succeeded first, or logins could fail.
+=================================================================================*/
+USE master;
+GO
+
+-- drop existing version if re-deploying
+IF EXISTS (SELECT 1 FROM sys.server_triggers WHERE name = 'trg_LogonAudit')
+    DROP TRIGGER trg_LogonAudit ON ALL SERVER;
+GO
+
+CREATE TRIGGER trg_LogonAudit
+ON ALL SERVER
+FOR LOGON
+AS
+BEGIN
+    BEGIN TRY
+        INSERT INTO DBA.dbo.LoginAudit
+            (LoginName, HostName, ProgramName, ClientIP, DatabaseName)
+        SELECT
+            ORIGINAL_LOGIN(),                       -- real login (handles impersonation)
+            HOST_NAME(),                            -- client machine
+            PROGRAM_NAME(),                         -- application name
+            EVENTDATA().value                       -- source IP from event XML
+                ('(/EVENT_INSTANCE/ClientHost)[1]', 'VARCHAR(48)'),
+            DB_NAME();                              -- DB context at logon
+    END TRY
+    BEGIN CATCH
+        -- intentionally swallow errors: auditing must NEVER block a login
+    END CATCH
+END;
+GO
+
+PRINT 'Logon trigger trg_LogonAudit created and now capturing logins.';
+GO
+
+
+/*=================================================================================
+  STEP 3 : REPORT — LAST LOGIN TIME PER LOGIN  (read-only)
+  ---------------------------------------------------------------------------------
+  The core answer: when did each login last connect, and how long ago.
+=================================================================================*/
+USE DBA;
+GO
+
+SELECT
+    LoginName,
+    MAX(LoginTime)                              AS last_login_time,
+    DATEDIFF(DAY, MAX(LoginTime), GETDATE())    AS days_since_last_login,
+    COUNT(*)                                    AS total_logins_recorded,
+    MIN(LoginTime)                              AS first_seen_time
+FROM dbo.LoginAudit
+GROUP BY LoginName
+ORDER BY last_login_time DESC;
+GO
+
+
+/*=================================================================================
+  STEP 4 : REPORT — LOGINS THAT NEVER CONNECTED  (read-only)
+  ---------------------------------------------------------------------------------
+  Lists server logins that exist but have NOT appeared in the audit since the
+  trigger was deployed. Great for security reviews / decommissioning stale logins.
+  NOTE: "never" means "not since auditing started" — give it time to build history.
+=================================================================================*/
+SELECT
+    sp.name              AS login_name,
+    sp.type_desc         AS login_type,
+    sp.create_date,
+    sp.is_disabled
+FROM sys.server_principals AS sp
+LEFT JOIN (SELECT DISTINCT LoginName FROM DBA.dbo.LoginAudit) AS la
+       ON sp.name = la.LoginName
+WHERE sp.type IN ('S','U','G')      -- S=SQL login, U=Windows user, G=Windows group
+  AND sp.name NOT LIKE '##%'        -- skip internal certificate-based principals
+  AND sp.name NOT LIKE 'NT %'       -- optional: skip NT SERVICE / NT AUTHORITY
+  AND la.LoginName IS NULL          -- never seen in the audit
+ORDER BY sp.name;
+GO
+
+
+/*=================================================================================
+  STEP 5 : QUICK LIVE CHECK — WHO IS CONNECTED RIGHT NOW  (read-only, no history)
+  ---------------------------------------------------------------------------------
+  Instant view of active sessions. Works even before the trigger has history.
+  Useful for "is this login active at this moment?"
+=================================================================================*/
+SELECT
+    s.login_name,
+    s.host_name,
+    s.program_name,
+    DB_NAME(s.database_id)      AS database_name,
+    s.login_time,
+    s.last_request_start_time,
+    s.last_request_end_time,
+    s.status
+FROM sys.dm_exec_sessions AS s
+WHERE s.is_user_process = 1
+ORDER BY s.last_request_end_time DESC;
+GO
+
+
+/*=================================================================================
+  STEP 6 : MAINTENANCE & EMERGENCY CONTROLS
+  ---------------------------------------------------------------------------------
+  Housekeeping for the audit table, plus how to disable the trigger if needed.
+=================================================================================*/
+
+-- (a) OPTIONAL CLEANUP: keep only the last 1 year of login history
+--     Schedule this periodically so the table doesn't grow forever.
+-- DELETE FROM DBA.dbo.LoginAudit WHERE LoginTime < DATEADD(YEAR, -1, GETDATE());
+
+-- (b) EMERGENCY DISABLE: if the trigger ever misbehaves and blocks logins,
+--     connect using the Dedicated Admin Connection (DAC) and run:
+-- DISABLE TRIGGER trg_LogonAudit ON ALL SERVER;
+
+-- (c) RE-ENABLE after fixing:
+-- ENABLE TRIGGER trg_LogonAudit ON ALL SERVER;
+
+-- (d) FULLY REMOVE the trigger:
+-- DROP TRIGGER trg_LogonAudit ON ALL SERVER;
+GO
