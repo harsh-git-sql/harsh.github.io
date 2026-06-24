@@ -1,1 +1,138 @@
-a
+/*=================================================================================
+  SHORT-TERM DATABASE GROWTH TRACKER (Daily Snapshot Method)
+  ---------------------------------------------------------------------------------
+  PURPOSE : Track day-over-day file growth (data + log) per database / drive.
+            Answers "what grew since yesterday?" which backup history cannot.
+
+  SAFETY  : The ONLY writes are to your DBA admin database (dbo.FileSizeSnapshot).
+            It NEVER writes to production data — it only READS sys.master_files.
+
+  HOW TO USE:
+     STEP 1 -> Run ONCE to create the snapshot table.
+     STEP 2 -> Schedule via SQL Agent (daily / twice-daily) to capture sizes.
+     STEP 3 -> Run anytime to see what grew since the previous snapshot.
+     STEP 4 -> (Optional) Live "drive full RIGHT NOW" check — needs no history.
+=================================================================================*/
+
+
+/*=================================================================================
+  STEP 1 : CREATE THE SNAPSHOT TABLE  (run ONCE)
+  ---------------------------------------------------------------------------------
+  Stores a timestamped record of every file's allocated size.
+  Lives in your DBA database — change "DBA" to your admin DB name if different.
+=================================================================================*/
+USE DBA;   -- 👈 your admin database (NOT a production data DB)
+GO
+
+IF OBJECT_ID('dbo.FileSizeSnapshot', 'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.FileSizeSnapshot
+    (
+        SnapshotID    INT IDENTITY(1,1) PRIMARY KEY,
+        CaptureTime   DATETIME       NOT NULL DEFAULT GETDATE(),
+        DatabaseName  SYSNAME        NOT NULL,
+        LogicalName   SYSNAME        NOT NULL,
+        FileType      NVARCHAR(60)   NOT NULL,   -- ROWS = data, LOG = log
+        DriveLetter   CHAR(1)        NULL,
+        PhysicalName  NVARCHAR(260)  NOT NULL,
+        AllocatedGB   DECIMAL(20,3)  NOT NULL
+    );
+
+    -- index to speed up the "latest vs previous" comparison in Step 3
+    CREATE INDEX IX_FileSizeSnapshot_DB_File_Time
+        ON dbo.FileSizeSnapshot (DatabaseName, LogicalName, CaptureTime DESC);
+
+    PRINT 'Table dbo.FileSizeSnapshot created.';
+END
+ELSE
+    PRINT 'Table dbo.FileSizeSnapshot already exists - skipping creation.';
+GO
+
+
+/*=================================================================================
+  STEP 2 : CAPTURE A SNAPSHOT  (schedule this in SQL Agent)
+  ---------------------------------------------------------------------------------
+  Grabs the CURRENT allocated size of every file, instance-wide.
+  Reads only from sys.master_files (read-only on production).
+  Run once a day (or twice, e.g. 8 AM & 8 PM) for finer detail.
+=================================================================================*/
+USE DBA;
+GO
+
+INSERT INTO dbo.FileSizeSnapshot
+      (DatabaseName, LogicalName, FileType, DriveLetter, PhysicalName, AllocatedGB)
+SELECT
+      DB_NAME(mf.database_id),
+      mf.name,
+      mf.type_desc,
+      LEFT(mf.physical_name, 1),
+      mf.physical_name,
+      CAST(mf.size * 8.0 / 1048576 AS DECIMAL(20,3))   -- 8KB pages -> GB
+FROM sys.master_files AS mf
+WHERE mf.database_id > 4;          -- skip system DBs (remove this line to include them)
+
+PRINT 'Snapshot captured at ' + CONVERT(VARCHAR(30), GETDATE(), 120);
+GO
+
+
+/*=================================================================================
+  STEP 3 : "WHAT GREW SINCE YESTERDAY?" REPORT  (read-only)
+  ---------------------------------------------------------------------------------
+  Compares each file's LATEST snapshot vs its PREVIOUS snapshot and shows the delta.
+  Needs at least 2 snapshots to return results.
+  Only files whose size CHANGED are listed; biggest growers on top.
+=================================================================================*/
+USE DBA;
+GO
+
+;WITH Ranked AS
+(
+    -- number each file's snapshots: 1 = latest, 2 = previous, ...
+    SELECT *,
+           ROW_NUMBER() OVER (PARTITION BY DatabaseName, LogicalName
+                              ORDER BY CaptureTime DESC) AS rn
+    FROM dbo.FileSizeSnapshot
+)
+SELECT
+    cur.DatabaseName,
+    cur.LogicalName,
+    cur.FileType,                       -- ROWS = data file, LOG = log file
+    cur.DriveLetter,
+    prev.AllocatedGB        AS previous_gb,
+    cur.AllocatedGB         AS latest_gb,
+    CAST(cur.AllocatedGB - prev.AllocatedGB AS DECIMAL(20,3)) AS growth_gb,
+    prev.CaptureTime        AS previous_capture,
+    cur.CaptureTime         AS latest_capture
+FROM Ranked cur
+JOIN Ranked prev
+      ON  cur.DatabaseName = prev.DatabaseName
+      AND cur.LogicalName  = prev.LogicalName
+      AND cur.rn  = 1                   -- latest snapshot
+      AND prev.rn = 2                   -- previous snapshot
+WHERE cur.AllocatedGB <> prev.AllocatedGB   -- only show files that changed
+ORDER BY growth_gb DESC;
+GO
+
+
+/*=================================================================================
+  STEP 4 : LIVE "DRIVE FULL RIGHT NOW" CHECK  (read-only, no history needed)
+  ---------------------------------------------------------------------------------
+  Emergency view of current allocated size per file, sorted biggest first.
+  Use this when a drive fills up and you need an instant answer.
+=================================================================================*/
+SELECT
+    DB_NAME(mf.database_id)        AS database_name,
+    mf.type_desc                   AS file_type,
+    LEFT(mf.physical_name, 1)      AS drive_letter,
+    mf.name                        AS logical_name,
+    mf.physical_name               AS physical_path,
+    CAST(mf.size * 8.0 / 1048576 AS DECIMAL(20,3)) AS allocated_gb,
+    -- autogrowth setting (helps explain runaway growth)
+    CASE WHEN mf.is_percent_growth = 1
+         THEN CAST(mf.growth AS VARCHAR(10)) + ' %'
+         ELSE CAST(mf.growth * 8 / 1024 AS VARCHAR(20)) + ' MB'
+    END                            AS autogrowth_setting
+FROM sys.master_files AS mf
+WHERE mf.database_id > 4
+ORDER BY allocated_gb DESC;
+GO
