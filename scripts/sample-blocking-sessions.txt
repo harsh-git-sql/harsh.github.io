@@ -1,15 +1,35 @@
--- Find currently blocking and blocked sessions
 SELECT
-    blocking.session_id AS blocking_session_id,
-    blocked.session_id AS blocked_session_id,
-    waitstats.wait_type,
-    waitstats.wait_duration_ms,
-    blocked_sql.text AS blocked_sql_text
-FROM sys.dm_exec_sessions blocked
-JOIN sys.dm_os_waiting_tasks waitstats
-    ON blocked.session_id = waitstats.session_id
-JOIN sys.dm_exec_sessions blocking
-    ON waitstats.blocking_session_id = blocking.session_id
-CROSS APPLY sys.dm_exec_sql_text(
-    (SELECT sql_handle FROM sys.dm_exec_requests WHERE session_id = blocked.session_id)
-) blocked_sql;
+    s.session_id                     AS blocker_spid,
+    s.login_name                     AS blocker_login,
+    s.host_name                      AS blocker_host,
+    c.client_net_address             AS blocker_ip,
+    s.login_time                     AS blocker_login_time,
+    s.last_request_start_time        AS blocker_last_batch,
+    DB_NAME(st.dbid)                 AS blocker_database,
+    OBJECT_NAME(st.objectid, st.dbid) AS blocker_object,
+    -- how many sessions this SPID is blocking
+    (SELECT COUNT(*)
+     FROM sys.dm_exec_requests AS br
+     WHERE br.blocking_session_id = s.session_id) AS blocking_count,
+    -- list of blocked SPIDs in one column
+    (SELECT STRING_AGG(CAST(br.session_id AS VARCHAR(10)), ', ')
+     FROM sys.dm_exec_requests AS br
+     WHERE br.blocking_session_id = s.session_id) AS blocked_spids,
+    st.text                          AS blocker_sql_text
+FROM sys.dm_exec_sessions AS s
+JOIN sys.dm_exec_connections AS c
+    ON s.session_id = c.session_id
+CROSS APPLY sys.dm_exec_sql_text(c.most_recent_sql_handle) AS st
+WHERE s.session_id IN
+(
+    SELECT DISTINCT r.blocking_session_id
+    FROM sys.dm_exec_requests AS r
+    WHERE r.blocking_session_id <> 0
+)
+AND s.session_id NOT IN
+(
+    SELECT r2.session_id
+    FROM sys.dm_exec_requests AS r2
+    WHERE r2.blocking_session_id <> 0
+)
+ORDER BY blocking_count DESC;
