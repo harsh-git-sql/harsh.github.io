@@ -165,13 +165,117 @@
     font-size:.95rem;
     pointer-events:none;
   }
+  .toggle-all-btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:13px 18px;
+    border-radius:10px;
+    border:1px solid var(--border);
+    background:var(--bg-soft);
+    color:var(--text);
+    font-family:inherit;
+    font-weight:600;
+    font-size:.9rem;
+    cursor:pointer;
+    transition:all .2s var(--ease);
+    white-space:nowrap;
+  }
+  .toggle-all-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+  .toggle-all-btn .chev{
+    display:inline-block;
+    transition:transform .3s var(--ease);
+    font-size:.78rem;
+  }
+  .toggle-all-btn.is-expanded .chev{transform:rotate(180deg);}
 
-  /* ---------- Main grid ---------- */
+  /* ---------- Main grid (index + list) ---------- */
   .main-wrap{
     max-width:1140px;
     margin:0 auto;
     padding:24px 28px 90px;
+    display:grid;
+    grid-template-columns:220px 1fr;
+    gap:32px;
+    align-items:start;
   }
+
+  /* ---------- Side index/TOC ---------- */
+  .side-index{
+    position:sticky;
+    top:84px;
+    max-height:calc(100vh - 110px);
+    overflow-y:auto;
+    padding-right:6px;
+  }
+  .side-index::-webkit-scrollbar{width:5px;}
+  .side-index::-webkit-scrollbar-thumb{background:var(--border);border-radius:10px;}
+  .side-index h4{
+    margin:0 0 12px;
+    font-size:.76rem;
+    font-weight:700;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+  }
+  .side-index ul{
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    list-style:none;
+    border-left:1px solid var(--border);
+  }
+  .side-index li a{
+    display:block;
+    padding:7px 14px;
+    margin-left:-1px;
+    border-left:2px solid transparent;
+    font-size:.86rem;
+    color:var(--text-soft);
+    text-decoration:none;
+    line-height:1.4;
+    transition:color .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+    border-radius:0 8px 8px 0;
+  }
+  .side-index li a:hover{color:var(--accent);background:var(--bg-soft);}
+  .side-index li a.active{
+    color:var(--accent);
+    border-left-color:var(--accent);
+    background:var(--accent-soft);
+    font-weight:600;
+  }
+  .side-index-empty{
+    font-size:.84rem;
+    color:var(--text-faint);
+  }
+
+  @media (max-width:900px){
+    .main-wrap{grid-template-columns:1fr;}
+    .side-index{
+      position:static;
+      max-height:none;
+      order:-1;
+      margin-bottom:8px;
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      background:var(--bg-soft);
+      padding:16px 18px;
+    }
+    .side-index ul{
+      flex-direction:row;
+      flex-wrap:wrap;
+      border-left:none;
+      gap:8px;
+    }
+    .side-index li a{
+      border:1px solid var(--border);
+      border-radius:999px;
+      padding:6px 14px;
+      background:#fff;
+    }
+    .side-index li a.active{border-color:var(--accent);}
+  }
+
   .snippet-list{
     display:flex;
     flex-direction:column;
@@ -184,6 +288,7 @@
     box-shadow:var(--shadow-sm);
     overflow:hidden;
     transition:box-shadow .25s var(--ease), transform .25s var(--ease);
+    scroll-margin-top:90px;
   }
   .snippet-card:hover{box-shadow:var(--shadow-md);}
   .snippet-top{
@@ -193,6 +298,31 @@
     gap:14px;
     padding:16px 20px;
     flex-wrap:wrap;
+    cursor:pointer;
+    user-select:none;
+  }
+  .snippet-top:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+  .snippet-title-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .expand-chev{
+    flex:none;
+    width:22px;height:22px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:6px;
+    background:var(--bg-soft-2);
+    color:var(--text-soft);
+    font-size:.72rem;
+    transition:transform .28s var(--ease), background .2s var(--ease), color .2s var(--ease);
+  }
+  .snippet-card.expanded .expand-chev{
+    transform:rotate(90deg);
+    background:var(--accent-soft);
+    color:var(--accent);
   }
   .snippet-meta h3{
     margin:0 0 6px;
@@ -207,6 +337,11 @@
     font-weight:600;
     padding:3px 10px;
     border-radius:999px;
+  }
+  .top-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
   }
   .copy-btn{
     display:inline-flex;
@@ -229,6 +364,18 @@
     background:#dcfce7;
     border-color:#86efac;
     color:#15803d;
+  }
+  .code-collapse{
+    display:grid;
+    grid-template-rows:0fr;
+    transition:grid-template-rows .32s var(--ease);
+  }
+  .snippet-card.expanded .code-collapse{
+    grid-template-rows:1fr;
+  }
+  .code-collapse-inner{
+    overflow:hidden;
+    min-height:0;
   }
   .code-wrap{
     background:var(--code-bg);
@@ -265,6 +412,7 @@
 
   @media (max-width:640px){
     .snippet-top{flex-direction:column;align-items:flex-start;}
+    .top-actions{width:100%;}
     .copy-btn{width:100%;justify-content:center;}
   }
 </style>
@@ -291,9 +439,19 @@
     <span class="ic">🔍</span>
     <input id="searchInput" type="text" placeholder="Search by title or tag…">
   </div>
+  <button id="toggleAllBtn" class="toggle-all-btn">
+    <span class="chev">▾</span>
+    <span id="toggleAllLabel">Expand all</span>
+  </button>
 </div>
 
 <div class="main-wrap">
+  <aside class="side-index" id="sideIndex">
+    <h4>On this page</h4>
+    <ul id="sideIndexList">
+      <li class="side-index-empty">Loading…</li>
+    </ul>
+  </aside>
   <div id="snippetList" class="snippet-list">
     <p class="state-msg">Loading scripts…</p>
   </div>
@@ -308,10 +466,54 @@
 
   const listEl = document.getElementById('snippetList');
   const searchInput = document.getElementById('searchInput');
+  const sideIndexList = document.getElementById('sideIndexList');
+  const toggleAllBtn = document.getElementById('toggleAllBtn');
+  const toggleAllLabel = document.getElementById('toggleAllLabel');
   let allSnippets = [];
+  let anyExpanded = false; // tracks state for the Expand all / Collapse all button
 
   function escapeHtml(str){
     return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function slugify(str, i){
+    const base = str.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    return (base || 'script') + '-' + i;
+  }
+
+  function updateToggleAllButton(){
+    const cards = listEl.querySelectorAll('.snippet-card');
+    anyExpanded = Array.from(cards).some(c => c.classList.contains('expanded'));
+    toggleAllBtn.classList.toggle('is-expanded', anyExpanded);
+    toggleAllLabel.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
+  }
+
+  function setCardExpanded(card, expand){
+    card.classList.toggle('expanded', expand);
+    const top = card.querySelector('.snippet-top');
+    if(top) top.setAttribute('aria-expanded', expand ? 'true' : 'false');
+  }
+
+  function renderSideIndex(snippets){
+    if(!snippets.length){
+      sideIndexList.innerHTML = '<li class="side-index-empty">No scripts yet.</li>';
+      return;
+    }
+    sideIndexList.innerHTML = snippets.map((s, i) => `
+      <li><a href="#${s._slug}" data-target="${s._slug}">${escapeHtml(s.title)}</a></li>
+    `).join('');
+
+    sideIndexList.querySelectorAll('a').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const card = document.getElementById(a.dataset.target);
+        if(!card) return;
+        setCardExpanded(card, true);
+        updateToggleAllButton();
+        card.scrollIntoView({behavior:'smooth', block:'start'});
+        history.replaceState(null, '', '#' + a.dataset.target);
+      });
+    });
   }
 
   function render(snippets){
@@ -320,15 +522,24 @@
       return;
     }
     listEl.innerHTML = snippets.map((s, i) => `
-      <div class="snippet-card">
-        <div class="snippet-top">
-          <div class="snippet-meta">
-            <h3>${escapeHtml(s.title)}</h3>
-            <div class="tag-row">${(s.tags||[]).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+      <div class="snippet-card" id="${s._slug}" data-index="${i}">
+        <div class="snippet-top" role="button" tabindex="0" aria-expanded="false">
+          <div class="snippet-title-row">
+            <span class="expand-chev">▶</span>
+            <div class="snippet-meta">
+              <h3>${escapeHtml(s.title)}</h3>
+              <div class="tag-row">${(s.tags||[]).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+            </div>
           </div>
-          <button class="copy-btn" data-index="${i}">📋 Copy</button>
+          <div class="top-actions">
+            <button class="copy-btn" data-index="${i}">📋 Copy</button>
+          </div>
         </div>
-        <div class="code-wrap"><pre id="code-${i}">Loading…</pre></div>
+        <div class="code-collapse">
+          <div class="code-collapse-inner">
+            <div class="code-wrap"><pre id="code-${i}">Loading…</pre></div>
+          </div>
+        </div>
       </div>
     `).join('');
 
@@ -336,16 +547,38 @@
       fetch(s.file)
         .then(r => { if(!r.ok) throw new Error('not found'); return r.text(); })
         .then(text => {
-          document.getElementById('code-' + i).textContent = text;
+          const el = document.getElementById('code-' + i);
+          if(el) el.textContent = text;
           s._content = text;
         })
         .catch(() => {
-          document.getElementById('code-' + i).textContent = '// Could not load ' + s.file;
+          const el = document.getElementById('code-' + i);
+          if(el) el.textContent = '// Could not load ' + s.file;
         });
     });
 
+    // Card header click/keyboard toggles collapse — ignore clicks on the copy button itself
+    listEl.querySelectorAll('.snippet-top').forEach(top => {
+      const card = top.closest('.snippet-card');
+      const toggle = () => {
+        setCardExpanded(card, !card.classList.contains('expanded'));
+        updateToggleAllButton();
+      };
+      top.addEventListener('click', (e) => {
+        if(e.target.closest('.copy-btn')) return;
+        toggle();
+      });
+      top.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter' || e.key === ' '){
+          e.preventDefault();
+          toggle();
+        }
+      });
+    });
+
     document.querySelectorAll('.copy-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const i = btn.dataset.index;
         const text = document.getElementById('code-' + i).textContent;
         navigator.clipboard.writeText(text).then(() => {
@@ -358,26 +591,52 @@
         });
       });
     });
+
+    updateToggleAllButton();
+
+    // If the URL has a hash matching a card, expand and scroll to it
+    if(location.hash){
+      const target = document.getElementById(location.hash.slice(1));
+      if(target){
+        setCardExpanded(target, true);
+        updateToggleAllButton();
+        setTimeout(() => target.scrollIntoView({behavior:'smooth', block:'start'}), 50);
+      }
+    }
   }
+
+  toggleAllBtn.addEventListener('click', () => {
+    const cards = listEl.querySelectorAll('.snippet-card');
+    const expandAll = !anyExpanded;
+    cards.forEach(card => setCardExpanded(card, expandAll));
+    updateToggleAllButton();
+  });
 
   fetch('manifest.json')
     .then(r => r.json())
     .then(data => {
-      allSnippets = data;
+      allSnippets = data.map((s, i) => ({...s, _slug: slugify(s.title, i)}));
+      renderSideIndex(allSnippets);
       render(allSnippets);
     })
     .catch(() => {
       listEl.innerHTML = '<p class="state-msg">Could not load manifest.json — check the file is present in this folder.</p>';
+      sideIndexList.innerHTML = '<li class="side-index-empty">Unavailable</li>';
     });
 
   searchInput.addEventListener('input', (e) => {
     const q = e.target.value.toLowerCase().trim();
-    if(!q){ render(allSnippets); return; }
+    if(!q){
+      render(allSnippets);
+      renderSideIndex(allSnippets);
+      return;
+    }
     const filtered = allSnippets.filter(s =>
       s.title.toLowerCase().includes(q) ||
       (s.tags||[]).some(t => t.toLowerCase().includes(q))
     );
     render(filtered);
+    renderSideIndex(filtered);
   });
 </script>
 
